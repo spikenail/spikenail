@@ -1,6 +1,6 @@
 {
   "name": "spikenail",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "spikenail: node.js graphql-first API framework",
   "keywords": [
     "graphql",
