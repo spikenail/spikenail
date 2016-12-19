@@ -60,20 +60,23 @@ class Spikenail extends EventEmitter {
     this.setMaxListeners(0);
 
     const app = new Koa();
+    let router = koaRouter();
 
     // Load models
     this.models = this.loadModels();
 
-    // Create root Query
-    this.graphqlSchema = this.createGraphqlSchema(this.models);
+    // Generate and expose graphql schema
+    if (Object.keys(this.models).length) {
+        this.graphqlSchema = this.createGraphqlSchema(this.models);
 
-    let router = koaRouter();
-
-    // Set default graphql route
-    router.all('/graphql', convert(graphqlHTTP({
-      schema: this.graphqlSchema,
-      graphiql: true
-    })));
+        // Set default graphql route
+        router.all('/graphql', convert(graphqlHTTP({
+            schema: this.graphqlSchema,
+            graphiql: true
+        })));
+    } else {
+      debug('No models loaded');
+    }
 
     app
       .use(convert(cors()))
@@ -136,11 +139,17 @@ class Spikenail extends EventEmitter {
     debug('Booting the app', appDir);
 
     // Boot data sources
-    let sources = require(appDir + '/config/sources.js');
+    let sources;
     try {
-      await this.bootDataSources(sources);
-    } catch (err) {
-      console.error(err);
+        sources = require(appDir + '/config/sources.js');
+        await this.bootDataSources(sources);
+    } catch (e) {
+      if (e instanceof Error && e.code === "MODULE_NOT_FOUND") {
+          debug('Can not load config/sources.js')
+      } else {
+        console.error(e);
+        throw e;
+      }
     }
   }
 
