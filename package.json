@@ -59,13 +59,14 @@
     "validator": "^6.0.0"
   },
   "devDependencies": {
+    "babel-cli": "^6.18.0",
     "babel-core": "^6.9.1",
+    "babel-eslint": "^4.1.6",
+    "babel-plugin-add-module-exports": "^0.2.1",
     "babel-polyfill": "^6.9.1",
     "babel-preset-es2015-node5": "^1.2.0",
     "babel-preset-stage-0": "^6.5.0",
     "babel-register": "^6.9.0",
-    "babel-cli": "^6.18.0",
-    "babel-eslint": "^4.1.6",
     "coveralls": "^2.11.4",
     "dependency-check": "^2.5.1",
     "doctoc": "^0.15.0",

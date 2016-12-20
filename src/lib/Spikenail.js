@@ -48,7 +48,7 @@ import MutationError from './types/MutationError';
 /**
  * Spikenail server
  */
-class Spikenail extends EventEmitter {
+export default class Spikenail extends EventEmitter {
 
   /**
    * @constructor
@@ -707,5 +707,3 @@ class Spikenail extends EventEmitter {
 
   }
 }
-
-export default new Spikenail();

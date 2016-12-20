@@ -1,2 +1,7 @@
 const Spikenail = require('./lib/Spikenail');
-module.exports = Spikenail;
+const Model = require('./lib/Model');
+
+export default {
+  'Model': Model,
+  'Spikenail': Spikenail
+};

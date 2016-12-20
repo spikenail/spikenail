@@ -30,10 +30,11 @@ import GraphQLJSON from 'graphql-type-json';
 
 import connectionFromMongooseQuery from './components/RelayMongooseConnection';
 
-export const ACTION_CREATE = Symbol('create');
-export const ACTION_UPDATE = Symbol('update');
-export const ACTION_REMOVE = Symbol('remove');
-export const ACTION_READ = Symbol('read');
+// TODO: move constants to separate file
+const ACTION_CREATE = Symbol('create');
+const ACTION_UPDATE = Symbol('update');
+const ACTION_REMOVE = Symbol('remove');
+const ACTION_READ = Symbol('read');
 
 // Default role system implementation
 
@@ -43,7 +44,7 @@ export const ACTION_READ = Symbol('read');
  *
  * @type {Symbol}
  */
-export const ROLE_ANONYMOUS = Symbol('anonymous');
+const ROLE_ANONYMOUS = Symbol('anonymous');
 
 /**
  * Any authorized user
@@ -51,7 +52,7 @@ export const ROLE_ANONYMOUS = Symbol('anonymous');
  *
  * @type {Symbol}
  */
-export const ROLE_USER = Symbol('user');
+const ROLE_USER = Symbol('user');
 
 /**
  * Owner of the object
@@ -59,18 +60,18 @@ export const ROLE_USER = Symbol('user');
  *
  * @type {Symbol}
  */
-export const ROLE_OWNER = Symbol('owner');
+const ROLE_OWNER = Symbol('owner');
 
 /**
  * Owner of the root object - the one belongsTo points to
  *
  * @type {Symbol}
  */
-export const ROLE_PARENT_OWNER = Symbol('root_owner');
+const ROLE_PARENT_OWNER = Symbol('root_owner');
 
-export const ROLE_MEMBER = Symbol('member');
+const ROLE_MEMBER = Symbol('member');
 
-export const ROLE_PARENT_MEMBER = Symbol('root_member');
+const ROLE_PARENT_MEMBER = Symbol('root_member');
 
 /**
  * Actually just custom role with some logic
@@ -78,7 +79,7 @@ export const ROLE_PARENT_MEMBER = Symbol('root_member');
  *
  * @type {Symbol}
  */
-export const ROLE_ADMIN = Symbol('admin');
+const ROLE_ADMIN = Symbol('admin');
 
 /**
  * Spikenail model
