@@ -179,7 +179,7 @@ export default class Spikenail extends EventEmitter {
     let modelTypes = {};
     let modelFields = {};
 
-    // page info for relay support
+    // page info for relay pagination support
     // TODO: move page info outside? and don't create every time
     let PageInfo = new GraphQLNonNull(new GraphQLObjectType({
       name: 'PageInfo',
@@ -223,6 +223,8 @@ export default class Spikenail extends EventEmitter {
 
     // Preparing model types
     // The way to resolve circular references in graphql
+    // Determine viewer model if exists
+    let viewerModel;
     for (const className of Object.keys(models)) {
       debug('preparing model:', className);
 
@@ -231,6 +233,12 @@ export default class Spikenail extends EventEmitter {
       // Ignore empty model files
       if (!model.getName) {
         continue;
+      }
+
+      // Lets determine viewer model
+      if (model.isViewer()) {
+        debug('Viewer model found');
+        viewerModel = model;
       }
 
       let name = model.getName();
@@ -330,67 +338,70 @@ export default class Spikenail extends EventEmitter {
     // Create viewer schema
     // TODO:except relations
 
-    let viewerProperties = {};
-    // Copy non relation properties from user
-    for (let prop of Object.keys(models['user'].schema.properties)) {
-      let field = models['user'].schema.properties[prop];
-      // Skip relations
-      if (field.relation) {
-        continue;
+    let viewer;
+    if (viewerModel) {
+      let viewerProperties = {};
+      // Copy non relation properties from user
+      for (let prop of Object.keys(viewerModel.schema.properties)) {
+        let field = viewerModel.schema.properties[prop];
+        // Skip relations
+        if (field.relation) {
+          continue;
+        }
+
+        viewerProperties[prop] = field;
       }
 
-      viewerProperties[prop] = field;
-    }
+      // Create virtual relations for every model
+      for (const className of Object.keys(models)) {
+        debug('Loading model:', className);
 
-    // Create virtual relations for every model
-    for (const className of Object.keys(models)) {
-      debug('Loading model:', className);
+        let model = models[className];
 
-      let model = models[className];
+        // Ignore empty model files
+        if (!model.getName) {
+          continue;
+        }
+        debug('modelType', modelTypes[model.getName()]);
 
-      // Ignore empty model files
-      if (!model.getName) {
-        continue;
+        viewerProperties[model.getName()] = {
+          relation: 'hasOne',
+          ref: model.getName()
+        };
+
+        viewerProperties[pluralize(model.getName())] = {
+          relation: 'hasMany',
+          ref: model.getName(),
+          foreignKey: 'userId' // TODO: quick workaround
+        };
       }
-      debug('modelType', modelTypes[model.getName()]);
 
-      viewerProperties[model.getName()] = {
-        relation: 'hasOne',
-        ref: model.getName()
-      };
+      debug('viewerProperties', viewerProperties);
 
-      viewerProperties[pluralize(model.getName())] = {
-        relation: 'hasMany',
-        ref: model.getName(),
-        foreignKey: 'userId' // TODO: quick workaround
-      };
-    }
-
-    debug('viewerProperties', viewerProperties);
-
-    let viewerSchema = {
-      name: 'viewer',
-      properties: viewerProperties
-    };
-    let viewerFields = this.schemaToGraphqlFields(viewerSchema, modelTypes);
-
-    debug('viewer fields', viewerFields);
-
-    let viewer = {
-      type: new GraphQLObjectType({
+      let viewerSchema = {
         name: 'viewer',
-        fields: function() { return viewerFields },
-        interfaces: [nodeInterface]
-      }),
-      //args: models['user'].getGraphqlViewerArgs(),
-      // There is no arguments at all
-      //args: {
-      //  id: globalIdField('user')
-      //},
-      resolve: function(_, args) {
-        return models['user'].resolveViewer({}, ...arguments);
-      }
-    };
+        properties: viewerProperties
+      };
+      let viewerFields = this.schemaToGraphqlFields(viewerSchema, modelTypes);
+
+      debug('viewer fields', viewerFields);
+
+      viewer = {
+        type: new GraphQLObjectType({
+          name: 'viewer',
+          fields: function() { return viewerFields },
+          interfaces: [nodeInterface]
+        }),
+        //args: models['user'].getGraphqlViewerArgs(),
+        // There is no arguments at all
+        //args: {
+        //  id: globalIdField('user')
+        //},
+        resolve: function(_, args) {
+          return viewerModel.resolveViewer({}, ...arguments);
+        }
+      };
+    }
 
     // Create mutations
     let mutationFields = {};
@@ -421,19 +432,32 @@ export default class Spikenail extends EventEmitter {
 
     // Root query
     let queryFields = {
-      // TODO: viewer should extend node field
-      viewer: viewer,
       node: nodeField
     };
+
+    // Add viewer if defined
+    if (viewer) {
+      // TODO: viewer should extend node field
+      queryFields.viewer = viewer;
+    } else {
+      debug('no viewer defined');
+    }
+
     let RootQuery = new GraphQLObjectType({
       name: 'Query',
       fields: () => (queryFields)
     });
 
-    return new GraphQLSchema({
+    debug('RootQuery schema created');
+
+    let finalSchema = new GraphQLSchema({
       query: RootQuery,
       mutation: RootMutation
     });
+
+    debug('Final schema created');
+
+    return finalSchema;
   }
 
   /**
@@ -442,7 +466,7 @@ export default class Spikenail extends EventEmitter {
    * @param action
    * @param model
    * @param types
-   * @param viewer
+   * @param viewer May not exists
    * @returns {{}}
    */
   buildCRUDMutation(action, model, types, viewer) {
@@ -480,7 +504,7 @@ export default class Spikenail extends EventEmitter {
       inputFields: mutationFields,
 
       outputFields: {
-        viewer: viewer,
+        //viewer: viewer,
         errors: {
           type: new GraphQLList(MutationError),
           resolve: function({ errors }) {
@@ -500,6 +524,10 @@ export default class Spikenail extends EventEmitter {
         return model[`mutateAndGetPayload${capitalize(action)}`]({}, ...arguments)
       }
     };
+
+    if (viewer) {
+      config.outputFields.viewer = viewer;
+    }
 
     if (action == 'remove') {
       config.outputFields.removedId = {

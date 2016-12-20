@@ -122,6 +122,14 @@ export default class Model {
   }
 
   /**
+   * Is viewer
+   * @returns {boolean}
+   */
+  isViewer() {
+    return !!this.schema.isViewer
+  }
+
+  /**
    * Creates mongoose model
    *
    * @param schema
