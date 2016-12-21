@@ -1,5 +1,5 @@
 import DataLoader from 'dataloader';
-import Spikenail from '../Spikenail';
+import Spikenail from '../../Spikenail';
 
 // Koa2 middleware
 export default function(options) {

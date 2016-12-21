@@ -7,8 +7,8 @@ import koaRouter from 'koa-router';
 import cors from 'koa-cors';
 
 import mongoose from 'mongoose';
-import middleware from './middleware';
-import authMiddleware from './middleware/auth';
+import dataloadersMiddleware from './middlewares/dataloaders';
+import authMiddleware from './middlewares/auth';
 
 import pluralize from 'pluralize';
 import capitalize from 'lodash.capitalize';
@@ -81,7 +81,7 @@ export default class Spikenail extends EventEmitter {
     app
       .use(convert(cors()))
       .use(authMiddleware())
-      .use(middleware())
+      .use(dataloadersMiddleware())
       .use(router.routes());
 
     this.app = app;
