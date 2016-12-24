@@ -431,7 +431,7 @@ class Spikenail extends EventEmitter {
       }
       let graphqlType = modelTypes[model.getName()];
 
-      viewerFields['all' + capitalize(pluralize(model.getName()))] = this.wrapTypeIntoConnetion(graphqlType, 'viewer');
+      viewerFields['all' + capitalize(pluralize(model.getName()))] = this.wrapTypeIntoConnection(graphqlType, 'viewer');
     }
 
     if (Object.keys(viewerFields).length) {
