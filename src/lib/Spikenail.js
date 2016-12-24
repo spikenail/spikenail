@@ -48,7 +48,7 @@ import MutationError from './types/MutationError';
 /**
  * Spikenail server
  */
-export default class Spikenail extends EventEmitter {
+class Spikenail extends EventEmitter {
 
   /**
    * @constructor
@@ -58,40 +58,41 @@ export default class Spikenail extends EventEmitter {
 
     // Remove memory-leak warning about max listeners.
     this.setMaxListeners(0);
-
-    const app = new Koa();
-    let router = koaRouter();
-
-    // Load models
-    this.models = this.loadModels();
-
-    // Generate and expose graphql schema
-    if (Object.keys(this.models).length) {
-        this.graphqlSchema = this.createGraphqlSchema(this.models);
-
-        // Set default graphql route
-        router.all('/graphql', convert(graphqlHTTP({
-            schema: this.graphqlSchema,
-            graphiql: true
-        })));
-    } else {
-      debug('No models loaded');
-    }
-
-    app
-      .use(convert(cors()))
-      .use(authMiddleware())
-      .use(dataloadersMiddleware())
-      .use(router.routes());
-
-    this.app = app;
   }
 
   /**
    * Start the server
    */
   async start() {
+    debug('Starting the server');
     try {
+      const app = new Koa();
+      let router = koaRouter();
+
+      // Load models
+      this.models = await this.loadModels();
+
+      // Generate and expose graphql schema
+      if (Object.keys(this.models).length) {
+        this.graphqlSchema = this.createGraphqlSchema(this.models);
+
+        // Set default graphql route
+        router.all('/graphql', convert(graphqlHTTP({
+          schema: this.graphqlSchema,
+          graphiql: true
+        })));
+      } else {
+        debug('No models loaded');
+      }
+
+      app
+        .use(convert(cors()))
+        .use(authMiddleware())
+        .use(dataloadersMiddleware())
+        .use(router.routes());
+
+      this.app = app;
+
       await this.boot();
 
       this.app.listen(5000, (err) => {
@@ -735,3 +736,5 @@ export default class Spikenail extends EventEmitter {
 
   }
 }
+
+export default new Spikenail();

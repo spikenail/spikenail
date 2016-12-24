@@ -18,8 +18,10 @@ export default function(options) {
       console.log('token found', ctx.token);
 
       // request current user by token
-      // TODO: user model could not exists
-      ctx.currentUser = await Spikenail.models.user.model.findOne({ "tokens.token": ctx.token });
+      // TODO: user model is hardcoded as user, probably, make it configurable
+      if (Spikenail.models.user) {
+        ctx.currentUser = await Spikenail.models.user.model.findOne({"tokens.token": ctx.token});
+      }
       console.log('currentUser found', ctx.currentUser);
     }
 
