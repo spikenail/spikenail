@@ -46,9 +46,70 @@
 
 ## Usage
 
+## GraphQL API
+
+### Queries
+
+#### node
+
 ```js
+node(id: ID!): Node
+```
+
+https://facebook.github.io/relay/docs/graphql-object-identification.html#content
+
+#### viewer
+
+Root field
 
 ```
+viewer: viewer
+
+type viewer implements Node {
+  id: ID!
+  user: User,
+  allXs(): viewer_XConnection
+}
+```
+
+
+#### Query all items of a specific model
+
+For `Article` model:
+
+```
+query {
+    viewer {
+        allArticles() {
+            id, title, text
+        }
+    }
+}
+```
+
+
+#### Query single item
+
+Query a specific article by unique field:
+
+```
+query {
+    article(id: "article-id-1") {
+        id, title, text
+    }
+}
+```
+
+#### Relation queries
+
+#### Filtering queries
+
+### Mutations
+
+## ACL
+
+By default, ACL checks applies to every request. No matter what query was sent,
+The user should able to read and modify only data that he is able to access.
 
 ## License
 
