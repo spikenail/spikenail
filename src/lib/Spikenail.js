@@ -237,6 +237,7 @@ class Spikenail extends EventEmitter {
       }
 
       // Lets determine viewer model
+      // TODO: not sure if we actually need a flag for it. It is easier to always use model named User as viewer
       if (model.isViewer()) {
         debug('Viewer model found');
         viewerModel = model;
@@ -340,66 +341,109 @@ class Spikenail extends EventEmitter {
     // TODO:except relations
 
     let viewer;
+    // let viewerProperties = {
+    //   id: {
+    //     type: 'id'
+    //   },
+    //   user: {
+    //     type: 'user'
+    //   }
+    // };
+
+    // Viewer should have an ID! property, user property and connections
+    // Add id field
+    // if (viewerModel) {
+    //   viewerProperties.id = viewerModel.id
+    //
+    // } else {
+    //   viewerProperties.id = {
+    //     type: 'id'
+    //   }
+    // }
+
+    // Copy non relation properties from user
+    // for (let prop of Object.keys(viewerModel.schema.properties)) {
+    //   let field = viewerModel.schema.properties[prop];
+    //   // Skip relations
+    //   if (field.relation) {
+    //     continue;
+    //   }
+    //
+    //   viewerProperties[prop] = field;
+    // }
+
+    // Create virtual relations for every model
+    // for (const className of Object.keys(models)) {
+    //   debug('Loading model:', className);
+    //
+    //   let model = models[className];
+    //
+    //   // Ignore empty model files
+    //   if (!model.getName) {
+    //     continue;
+    //   }
+    //   debug('modelType', modelTypes[model.getName()]);
+    //
+    //   viewerProperties[model.getName()] = {
+    //     relation: 'hasOne',
+    //     ref: model.getName()
+    //   };
+    //
+    //   viewerProperties[pluralize(model.getName())] = {
+    //     relation: 'hasMany',
+    //     ref: model.getName(),
+    //     foreignKey: 'userId' // TODO: quick workaround
+    //   };
+    // }
+
+    //debug('viewerProperties', viewerProperties);
+
+    // let viewerSchema = {
+    //   name: 'viewer',
+    //   properties: viewerProperties
+    // };
+    //let viewerFields = this.schemaToGraphqlFields(viewerSchema, modelTypes);
+
+    //debug('viewer fields', viewerFields);
+
+    let viewerFields = {
+      id: globalIdField('user')
+    };
+
+    // Add id and current user fields if User model exists
     if (viewerModel) {
-      let viewerProperties = {};
-      // Copy non relation properties from user
-      for (let prop of Object.keys(viewerModel.schema.properties)) {
-        let field = viewerModel.schema.properties[prop];
-        // Skip relations
-        if (field.relation) {
-          continue;
+      //viewerFields.id = globalIdField('user');
+      viewerFields.user = {
+        type: modelTypes.user,
+          resolve: function(_, args) {
+          return viewerModel.resolveViewer({}, ...arguments);
         }
-
-        viewerProperties[prop] = field;
       }
+    }
 
-      // Create virtual relations for every model
-      for (const className of Object.keys(models)) {
-        debug('Loading model:', className);
+    // Add connections
+    for (const className of Object.keys(models)) {
+      let model = models[className];
 
-        let model = models[className];
-
-        // Ignore empty model files
-        if (!model.getName) {
-          continue;
-        }
-        debug('modelType', modelTypes[model.getName()]);
-
-        viewerProperties[model.getName()] = {
-          relation: 'hasOne',
-          ref: model.getName()
-        };
-
-        viewerProperties[pluralize(model.getName())] = {
-          relation: 'hasMany',
-          ref: model.getName(),
-          foreignKey: 'userId' // TODO: quick workaround
-        };
+      // Ignore empty model files
+      if (!model.getName) {
+        continue;
       }
+      let graphqlType = modelTypes[model.getName()];
 
-      debug('viewerProperties', viewerProperties);
+      viewerFields['all' + capitalize(pluralize(model.getName()))] = this.wrapTypeIntoConnetion(graphqlType, 'viewer');
+    }
 
-      let viewerSchema = {
-        name: 'viewer',
-        properties: viewerProperties
-      };
-      let viewerFields = this.schemaToGraphqlFields(viewerSchema, modelTypes);
-
-      debug('viewer fields', viewerFields);
-
+    if (Object.keys(viewerFields).length) {
       viewer = {
         type: new GraphQLObjectType({
           name: 'viewer',
           fields: function() { return viewerFields },
           interfaces: [nodeInterface]
         }),
-        //args: models['user'].getGraphqlViewerArgs(),
-        // There is no arguments at all
-        //args: {
-        //  id: globalIdField('user')
-        //},
         resolve: function(_, args) {
-          return viewerModel.resolveViewer({}, ...arguments);
+          return {};
+          //return viewerModel.resolveViewer({}, ...arguments);
         }
       };
     }
@@ -547,6 +591,77 @@ class Spikenail extends EventEmitter {
     return {
       [mutationName]: mutation
     }
+  }
+
+  /**
+   * Wrap type into relay connection
+   *
+   * @param type
+   * @param parentName
+   * @param resolve
+   * @returns {{type, args: ({first, last, after, before, filter}|*), resolve: (function(this:Spikenail))}}
+   */
+  wrapTypeIntoConnection(type, parentName, resolve) {
+    let name = type.name;
+    debug('wrapTypeIntoConnection', name);
+    // Relay (edges behaviour)
+    let Edge = new GraphQLObjectType({
+      // We adding schema.name to avoid same conection from two different models
+      name: parentName + '_' + name + 'Edge',
+      fields: function() {
+        return {
+          cursor: {
+            type: new GraphQLNonNull(GraphQLString)
+          },
+          node: {
+            type: type
+          }
+        }
+      }
+    });
+
+    let PageInfo = new GraphQLNonNull(new GraphQLObjectType({
+      name: 'PageInfo',
+      fields: () => ({
+        hasNextPage: {
+          type: new GraphQLNonNull(GraphQLBoolean)
+        },
+        hasPreviousPage: {
+          type: new GraphQLNonNull(GraphQLBoolean)
+        },
+        startCursor: {
+          type: GraphQLString
+        },
+        endCursor: {
+          type: GraphQLString
+        }
+      })
+    }));
+
+    return {
+      type: new GraphQLObjectType({
+        // We adding schema.name to avoid same conection from two different models
+        name: parentName + '_' + name + 'Connection',
+        fields: function () {
+          return {
+            edges: {
+              type: new GraphQLList(Edge)
+            },
+            pageInfo: {
+              type: PageInfo
+            }
+          }
+        }
+      }),
+      args: this.models[name].getGraphqlListArgs(),
+      resolve: (function(_, args) {
+        // TODO: not sure what is going on
+        return this.models[name].resolveList({
+          type: 'connection',
+          // field: field
+        }, ...arguments);
+      }).bind(this)
+    };
   }
 
   /**
