@@ -222,6 +222,11 @@ class Spikenail extends EventEmitter {
       }
     );
 
+    // Root query
+    let queryFields = {
+      node: nodeField
+    };
+
     // Preparing model types
     // The way to resolve circular references in graphql
     // Determine viewer model if exists
@@ -257,10 +262,24 @@ class Spikenail extends EventEmitter {
         },
         interfaces: [nodeInterface]
       });
-
     }
 
-    // Now fill modelFields
+    let viewerFields = {
+      id: globalIdField('user')
+    };
+
+    // Add id and current user fields if User model exists
+    if (viewerModel) {
+      //viewerFields.id = globalIdField('user');
+      viewerFields.user = {
+        type: modelTypes.user,
+        resolve: function(_, args) {
+          return viewerModel.resolveViewer({}, ...arguments);
+        }
+      }
+    }
+
+    // Now fill modelFields and viewer fields
     for (const className of Object.keys(models)) {
       debug('filling graphql type fields for:', className);
 
@@ -274,166 +293,29 @@ class Spikenail extends EventEmitter {
       let name = model.getName();
 
       modelFields[name] = this.schemaToGraphqlFields(model.schema, modelTypes);
+
+      let graphqlType = modelTypes[model.getName()];
+
+      viewerFields['all' + capitalize(pluralize(model.getName()))] = this.wrapTypeIntoConnection(graphqlType, 'viewer');
+
+      queryFields['get' + capitalize(model.getName())] = {
+        type: graphqlType,
+        args: model.getGraphqlItemArgs(),
+        resolve: (function(_, args) {
+          let params = {};
+
+          if (args.id) {
+            params.id = fromGlobalId(args.id).id;
+          }
+
+          return model.resolveItem(params, ...arguments);
+        }).bind(this)
+      };
     }
 
     debug('modelTypes', modelTypes);
 
-    // Put models into root
-    //for (const className of Object.keys(models)) {
-    //  debug('Loading model:', className);
-    //
-    //  let model = models[className];
-    //
-    //  // Ignore empty model files
-    //  if (!model.getName) {
-    //    continue;
-    //  }
-    //  debug('modelType', modelTypes[model.getName()]);
-    //
-    //  // Single item query
-    //  fields[model.getName()] = {
-    //    type: modelTypes[model.getName()],
-    //    args: model.getGraphqlItemArgs(),
-    //    //resolve: model.resolveItem.bind(model)
-    //    resolve: function(_, args) {
-    //      return model.resolve({
-    //        type: 'single'
-    //      }, ...arguments);
-    //    }
-    //  };
-    //
-    //  // List query - uses pluralized name
-    //  fields[pluralize(model.getName())] = {
-    //    type: new GraphQLList(modelTypes[model.getName()]),
-    //    args: model.getGraphqlListArgs(),
-    //    //resolve: model.resolveList.bind(model)
-    //    resolve: function(_, args) {
-    //      return model.resolve({
-    //        type: 'list'
-    //      }, ...arguments );
-    //    }
-    //  };
-    //}
-
-    // Add node field (relay support)
-    //fields.node = nodeField;
-
-    // Add viewer field for authentication purpose
-    // TODO: check if user type exists
-    //fields.viewer = {
-    //  type: modelTypes['user'],
-    //  resolve: function(_, args) {
-    //    debug('resolve viewer')
-    //    return {}
-    //  }
-    //};
-
-    //fields['viewer'] = fields['user'];
-
-    // TODO: create global viewer field without workaround and
-    // Viewer can see other users and viewers so ...
-    //delete fields.user;
-    //delete fields.users;
-
-
-    // Lets create virtual schema for viewer
-    // Create viewer schema
-    // TODO:except relations
-
     let viewer;
-    // let viewerProperties = {
-    //   id: {
-    //     type: 'id'
-    //   },
-    //   user: {
-    //     type: 'user'
-    //   }
-    // };
-
-    // Viewer should have an ID! property, user property and connections
-    // Add id field
-    // if (viewerModel) {
-    //   viewerProperties.id = viewerModel.id
-    //
-    // } else {
-    //   viewerProperties.id = {
-    //     type: 'id'
-    //   }
-    // }
-
-    // Copy non relation properties from user
-    // for (let prop of Object.keys(viewerModel.schema.properties)) {
-    //   let field = viewerModel.schema.properties[prop];
-    //   // Skip relations
-    //   if (field.relation) {
-    //     continue;
-    //   }
-    //
-    //   viewerProperties[prop] = field;
-    // }
-
-    // Create virtual relations for every model
-    // for (const className of Object.keys(models)) {
-    //   debug('Loading model:', className);
-    //
-    //   let model = models[className];
-    //
-    //   // Ignore empty model files
-    //   if (!model.getName) {
-    //     continue;
-    //   }
-    //   debug('modelType', modelTypes[model.getName()]);
-    //
-    //   viewerProperties[model.getName()] = {
-    //     relation: 'hasOne',
-    //     ref: model.getName()
-    //   };
-    //
-    //   viewerProperties[pluralize(model.getName())] = {
-    //     relation: 'hasMany',
-    //     ref: model.getName(),
-    //     foreignKey: 'userId' // TODO: quick workaround
-    //   };
-    // }
-
-    //debug('viewerProperties', viewerProperties);
-
-    // let viewerSchema = {
-    //   name: 'viewer',
-    //   properties: viewerProperties
-    // };
-    //let viewerFields = this.schemaToGraphqlFields(viewerSchema, modelTypes);
-
-    //debug('viewer fields', viewerFields);
-
-    let viewerFields = {
-      id: globalIdField('user')
-    };
-
-    // Add id and current user fields if User model exists
-    if (viewerModel) {
-      //viewerFields.id = globalIdField('user');
-      viewerFields.user = {
-        type: modelTypes.user,
-          resolve: function(_, args) {
-          return viewerModel.resolveViewer({}, ...arguments);
-        }
-      }
-    }
-
-    // Add connections
-    for (const className of Object.keys(models)) {
-      let model = models[className];
-
-      // Ignore empty model files
-      if (!model.getName) {
-        continue;
-      }
-      let graphqlType = modelTypes[model.getName()];
-
-      viewerFields['all' + capitalize(pluralize(model.getName()))] = this.wrapTypeIntoConnection(graphqlType, 'viewer');
-    }
-
     if (Object.keys(viewerFields).length) {
       viewer = {
         type: new GraphQLObjectType({
@@ -475,10 +357,6 @@ class Spikenail extends EventEmitter {
       fields: mutationFields
     });
 
-    // Root query
-    let queryFields = {
-      node: nodeField
-    };
 
     // Add viewer if defined
     if (viewer) {
@@ -606,7 +484,6 @@ class Spikenail extends EventEmitter {
     debug('wrapTypeIntoConnection', name);
     // Relay (edges behaviour)
     let Edge = new GraphQLObjectType({
-      // We adding schema.name to avoid same conection from two different models
       name: parentName + '_' + name + 'Edge',
       fields: function() {
         return {

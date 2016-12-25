@@ -1080,7 +1080,7 @@ export default class Model {
     //return dataLoaders[this.getName()].load(new mongoose.Types.ObjectId(args.id));
 
     // Params.id
-    return this.query({ query: { _id: new mongoose.Types.ObjectId(args.id || params.id) }, method: 'findOne' }, _, args);
+    return this.query({ query: { _id: new mongoose.Types.ObjectId(params.id || args.id) }, method: 'findOne' }, _, args);
   }
 
   /**
