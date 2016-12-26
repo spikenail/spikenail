@@ -1,7 +1,7 @@
 const Spikenail = require('./lib/Spikenail');
-const Model = require('./lib/Model');
+const MongoDBModel = require('./lib/MongoDBModel');
 
 export default {
-  'Model': Model,
+  'MongoDBModel': MongoDBModel,
   'Spikenail': Spikenail
 };

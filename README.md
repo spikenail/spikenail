@@ -106,6 +106,12 @@ query {
 
 ### Mutations
 
+## Model
+
+### Creating a model
+
+### Adding custom method
+
 ## ACL
 
 By default, ACL checks applies to every request. No matter what query was sent,

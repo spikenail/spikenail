@@ -106,11 +106,17 @@ export default class Model {
       }
 
       // Expose model
-      this.model = this.createMongooseModel(schema);
+      this.model = this.createAdapterModel(schema);
     } catch(err) {
       console.log('error', err);
     }
   }
+
+  /**
+   * Creates model instance of underlying database provider
+   * @param schema
+   */
+  createAdapterModel(schema) {}
 
   /**
    * Get name
@@ -196,19 +202,6 @@ export default class Model {
     }
 
     return field.type;
-  }
-
-  /**
-   * Viewer
-   * @deprecated Auth should be done through headers
-   */
-  getGraphqlViewerArgs() {
-    return {
-      token: {
-        name: 'token',
-        type: GraphQLString
-      }
-    }
   }
 
   /**
@@ -965,7 +958,7 @@ export default class Model {
 
         if (typeof cond === 'object') {
           // TODO: strange check that fails in my case
-        //if (cond && cond.constructor.name === 'Object') {
+          //if (cond && cond.constructor.name === 'Object') {
           options = cond.options;
           spec = Object.keys(cond)[0];
           cond = cond[spec];
