@@ -44,6 +44,7 @@ import {
 } from 'graphql-relay';
 
 import MutationError from './types/MutationError';
+import PageInfo from './types/PageInfo';
 
 /**
  * Spikenail server
@@ -180,27 +181,7 @@ class Spikenail extends EventEmitter {
     let modelTypes = {};
     let modelFields = {};
 
-    // page info for relay pagination support
-    // TODO: move page info outside? and don't create every time
-    let PageInfo = new GraphQLNonNull(new GraphQLObjectType({
-      name: 'PageInfo',
-      fields: () => ({
-        hasNextPage: {
-          type: new GraphQLNonNull(GraphQLBoolean)
-        },
-        hasPreviousPage: {
-          type: new GraphQLNonNull(GraphQLBoolean)
-        },
-        startCursor: {
-          type: GraphQLString
-        },
-        endCursor: {
-          type: GraphQLString
-        }
-      })
-    }));
-
-    modelTypes['pageInfo'] = PageInfo;
+    //modelTypes['pageInfo'] = PageInfo;
 
     // Relay node field support
     const {nodeInterface, nodeField} = nodeDefinitions(
@@ -497,24 +478,6 @@ class Spikenail extends EventEmitter {
       }
     });
 
-    let PageInfo = new GraphQLNonNull(new GraphQLObjectType({
-      name: 'PageInfo',
-      fields: () => ({
-        hasNextPage: {
-          type: new GraphQLNonNull(GraphQLBoolean)
-        },
-        hasPreviousPage: {
-          type: new GraphQLNonNull(GraphQLBoolean)
-        },
-        startCursor: {
-          type: GraphQLString
-        },
-        endCursor: {
-          type: GraphQLString
-        }
-      })
-    }));
-
     return {
       type: new GraphQLObjectType({
         // We adding schema.name to avoid same conection from two different models
@@ -603,7 +566,7 @@ class Spikenail extends EventEmitter {
                     type: new GraphQLList(Edge)
                   },
                   pageInfo: {
-                    type: types['pageInfo']
+                    type: PageInfo
                   }
                 }
               }
