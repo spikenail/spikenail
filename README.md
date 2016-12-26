@@ -94,7 +94,7 @@ Query a specific article by unique field:
 
 ```
 query {
-    article(id: "article-id-1") {
+    getArticle(id: "article-id-1") {
         id, title, text
     }
 }
