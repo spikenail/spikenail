@@ -34,17 +34,24 @@
   </a>
 </p>
 
-<p align="center"><big>
+Spikenail is an open-source Node.js ES7 framework that allows you to build GraphQL API with little or no coding.
 
-</big></p>
+## Features
+
+Full support of ES7 features
+
+Native GraphQL support
 
 ## Install
 
-```sh
-
+```
+npm install -g generator-spikenail
+yo spikenail
 ```
 
-## Usage
+## Core concepts
+
+## Model
 
 ## GraphQL API
 
@@ -106,16 +113,11 @@ query {
 
 ### Mutations
 
-## Model
-
 ### Creating a model
 
 ### Adding custom method
 
 ## ACL
-
-By default, ACL checks applies to every request. No matter what query was sent,
-The user should able to read and modify only data that he is able to access.
 
 ## License
 
