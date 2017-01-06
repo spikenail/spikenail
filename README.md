@@ -55,10 +55,11 @@ Ability to build an API just by configuring it is the main idea of spikenail.
 That configuration might include relations, access control, validations and everything else we need.
 
 At the same time we should provide enough flexibility by allowing to adjust or override every action spikenail does.
-
 From this point of view, spikenail provides an architecture and default implementation of it.
 
-Example model `models/item.js`
+The configuration mentioned above stored in models.
+
+Example model `models/Item.js`:
 
 ```js
 import { MongoDBModel } from 'spikenail';
@@ -148,6 +149,40 @@ export default new Item({
 ```
 
 ### CRUD
+
+In spikenail every CRUD action is a set of middlewares.
+These middlewares are not the request middlewares and exists separately.
+
+Default middlewares are:
+
+* Access control middleware
+* Validation middleware
+* Before action
+* Process action
+* After action
+
+The whole chain could be changed in any way.
+
+Example of how "Before action" middleware could be overriden:
+
+In the model class:
+
+```js
+
+  async beforeCreate(result, next, opts, input, ctx) {
+    let checkResult = await someAsyncCall();
+
+    if (checkResult) {
+        return next();
+    }
+
+    result.errors = [{
+        message: 'Custom error',
+        code: '40321'
+    }];
+  }
+
+```
 
 ## GraphQL API
 
