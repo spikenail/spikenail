@@ -51,6 +51,13 @@ yo spikenail
 
 ## Core concepts
 
+Ability to build an API just by configuring it is the main idea of spikenail.
+That configuration might include relations, access control, validations and everything else we need.
+
+At the same time we should provide enough flexibility by allowing to adjust or override every action spikenail does.
+
+From this point of view, spikenail provides an architecture and default implementation of it.
+
 Example model `models/item.js`
 
 ```js
