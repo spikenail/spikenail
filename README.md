@@ -51,7 +51,96 @@ yo spikenail
 
 ## Core concepts
 
-## Model
+Example model `models/item.js`
+
+```js
+import { MongoDBModel } from 'spikenail';
+
+class Item extends MongoDBModel {
+
+  /**
+   * Example of custom method
+   */
+  customMethod() {
+    // Access underlying mongoose model
+    return this.model.find({ 'category': 'test' }).limit(10);
+  }
+}
+
+export default new Item({
+  name: 'item',
+  properties: {
+    id: {
+      type: 'id'
+    },
+    name: {
+      type: String
+    },
+    description: {
+      type: String
+    },
+    position: {
+      type: Number
+    },
+    token: {
+      type: String
+    },
+    virtualField: {
+      virtual: true,
+      // Ensure that dependent fields will be queried from the database
+      dependsOn: ['position'],
+      type: String
+    },
+    userId: {
+      type: 'id'
+    },
+    // Relations
+    subItems: {
+      relation: 'hasMany',
+      ref: 'subItem',
+      foreignKey: 'itemId'
+    },
+    user: {
+      relation: 'belongsTo',
+      ref: 'user',
+      foreignKey: 'userId'
+    }
+  },
+  // Custom resolvers
+  resolvers: {
+    description: async function(_, args) {
+      // It is possible to do some async actions here
+      let asyncActionResult = await someAsyncAction();
+      return asyncActionResult ? _.description : null;
+    },
+    virtualField: (_, args) => {
+      return 'justCustomModification' + _.position
+    }
+  },
+  validations: [{
+    field: 'name',
+    assert: 'required'
+  }, {
+    field: 'name',
+    assert: 'maxLength',
+    max: 100
+  }, {
+    field: 'description',
+    assert: 'required'
+  }],
+  acls: [{
+    allow: false,
+    properties: ['token'],
+    actions: ['*']
+  }, {
+    allow: true,
+    properties: ['token'],
+    actions: [ACTION_CREATE]
+  }]
+});
+```
+
+### CRUD
 
 ## GraphQL API
 
