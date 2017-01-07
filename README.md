@@ -184,6 +184,27 @@ In the model class:
 
 ```
 
+## Configuration
+
+Configuration files are stored under config folder
+
+### Data sources
+
+Currently, only MongoDB supported.
+
+It is recommended to store all configuration using environment variables
+
+Example of `config/sources.js`
+
+```js
+export default {
+  'default': {
+    adapter: 'mongo',
+    connectionString: process.env.SPIKENAIL_MONGO_CONNECTION_STRING
+  }
+}
+```
+
 ## GraphQL API
 
 ### Queries
@@ -242,9 +263,22 @@ query {
 
 #### Filtering queries
 
-### Mutations
+#### Mutations
 
-### Creating a model
+## Creating a Model
+
+#### MongoDBModel
+
+Underlying model is a [mongoose](http://mongoosejs.com/) model. You can access it through `this.model`
+
+##### Changing collection name
+
+```js
+providerOptions: {
+    collection: 'customName'
+}
+```
+
 
 ### Adding custom method
 
