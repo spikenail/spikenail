@@ -82,7 +82,7 @@ export default class MongoDBModel extends Model {
 
     debug('mongoose props', propsMap);
 
-    const mongooseSchema = mongoose.Schema(propsMap);
+    const mongooseSchema = mongoose.Schema(propsMap, schema.providerOptions);
     return mongoose.model(schema.name, mongooseSchema);
   }
 
