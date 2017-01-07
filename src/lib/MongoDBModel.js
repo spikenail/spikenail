@@ -210,8 +210,6 @@ export default class MongoDBModel extends Model {
 
     let method = params.method ? params.method : 'find';
 
-    debug('query', this, this.model);
-
     let cursor = this.model[method](query);
     cursor.sort(this.argsToSort(args));
 
