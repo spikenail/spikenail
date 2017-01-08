@@ -281,7 +281,6 @@ properties: {
       foreignKey: 'bookId'
     }
 }
-
 ```
 
 ##### Custom hasMany condition
