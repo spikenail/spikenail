@@ -267,6 +267,31 @@ query {
 
 ## Creating a Model
 
+### Relations
+
+#### hasMany relation
+
+`models/Book.js`
+
+```js
+properties: {
+    categories: {
+      relation: 'hasMany',
+      ref: 'author',
+      foreignKey: 'bookId'
+    }
+}
+
+```
+
+##### Custom hasMany condition
+
+```js
+ getConditions: function(_) {
+    return { otherModelField: _.name }
+ }
+```
+
 #### MongoDBModel
 
 Underlying model is a [mongoose](http://mongoosejs.com/) model. You can access it through `this.model`

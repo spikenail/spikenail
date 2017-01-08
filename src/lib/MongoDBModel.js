@@ -491,7 +491,13 @@ export default class MongoDBModel extends Model {
 
       let cond = {};
       if (field.relation == 'hasMany') {
-        cond = { query: {[field.foreignKey]: _._id} };
+        // Check if custom condition specified
+        if (field.getConditions) {
+          cond.query = field.getConditions(_);
+          debug('custom hasMany conditions are specified');
+        } else {
+          cond = {query: {[field.foreignKey]: _._id}};
+        }
       }
 
       if (field.relation == 'belongsTo') {
