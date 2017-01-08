@@ -23,6 +23,7 @@ import {
   GraphQLString,
   GraphQLBoolean,
   GraphQLInt,
+  GraphQLFloat,
   GraphQLID,
   GraphQLSchema,
   GraphQLNonNull,
@@ -679,11 +680,13 @@ class Spikenail extends EventEmitter {
         return { type: GraphQLBoolean };
       case Number:
         return { type: GraphQLInt }; // TODO: there is two separate types in graphql
+      case 'Float':
+        return { type: GraphQLFloat };
       case Object:
         return { type: GraphQLJSON };
       // TODO: not sure
       case Array:
-        return { type: GraphQLJSON }
+        return { type: GraphQLJSON };
 
       default:
         return { type: GraphQLString };

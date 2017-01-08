@@ -96,6 +96,10 @@ export default class MongoDBModel extends Model {
       return mongoose.Schema.Types.ObjectId
     }
 
+    if (field.type == 'Float') {
+      return Number;
+    }
+
     return field.type;
   }
 
