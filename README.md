@@ -36,6 +36,7 @@
 
 Spikenail is an open-source Node.js ES7 framework that allows you to build GraphQL API with little or no coding.
 
+Star if you like the idea [![GitHub stars](https://img.shields.io/github/stars/badges/shields.svg?style=social&label=Star)](https://github.com/spikenail/spikenail)
 ## Features
 
 Full support of ES7 features
