@@ -42,6 +42,8 @@ Full support of ES7 features
 
 Native GraphQL support
 
+Relay compatible API
+
 ## Install
 
 ```
@@ -275,7 +277,7 @@ query {
 
 ```js
 properties: {
-    categories: {
+    authors: {
       relation: 'hasMany',
       ref: 'author',
       foreignKey: 'bookId'
@@ -305,6 +307,14 @@ providerOptions: {
 
 
 ### Adding custom method
+
+## Koa middlewares
+
+Spikenail is based on koa2.
+
+### Adding your own koa middlewares
+
+## Authentication
 
 ## ACL
 
