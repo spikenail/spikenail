@@ -197,27 +197,28 @@ export default class MongoDBModel extends Model {
   /**
    * Query
    *
-   * @param params
+   * @param options
    * @param _
    * @param args
    */
-  async query(params = {}, _, args) {
-    debug('query init', params);
+  async query(options = {}, _, args) {
+    debug('query init', options);
 
     let query = this.argsToConditions(args);
 
     debug('argsToConditions result', query);
 
-    if (params.query) {
-      query = Object.assign(query, params.query);
+    if (options.query) {
+      query = Object.assign(query, options.query);
     }
 
-    let method = params.method ? params.method : 'find';
+    let method = options.method ? options.method : 'find';
 
     let cursor = this.model[method](query);
     cursor.sort(this.argsToSort(args));
 
-    if (params.type == 'connection') {
+    //if (options.type == 'connection') {
+    if (method == 'find') {
       debug('query, type - connection');
       cursor = connectionFromMongooseQuery(cursor, args);
     }
@@ -474,71 +475,5 @@ export default class MongoDBModel extends Model {
    */
   async resolveOne(params, _, args, ctx) {
     return this.resolveItem(params, _, args, ctx);
-  }
-
-  /**
-   * Transform relation to additional condition and fetch data
-   *
-   * @param params
-   * @param _
-   * @param args
-   */
-  async resolveRelation(params, _, args, ctx) {
-    try {
-      let field = params.field;
-
-      let dataLoader = ctx.state.dataLoaders[this.getName()];
-
-      debug('resolveRelation - dataLoader', dataLoader);
-
-      debug('resolveRelation', field, _);
-
-      let cond = {};
-      if (field.relation == 'hasMany') {
-        // Check if custom condition specified
-        if (field.getConditions) {
-          cond.query = field.getConditions(_);
-          debug('custom hasMany conditions are specified');
-        } else {
-          cond = {query: {[field.foreignKey]: _._id}};
-        }
-      }
-
-      if (field.relation == 'belongsTo') {
-        // Belongs to probably will not include any additional conditions
-        let id = _[field.foreignKey];
-
-        // TODO: temp
-        //if (dataLoader) {
-        //  debug('dataloader exists - loading id', id);
-        //  return dataLoader.load(id) // TODO: anyway we need somehow pass fields list and etc
-        //} else {
-        //  debug('No data loader');
-        //}
-
-        cond = { method: 'findOne', query: { _id: id } }
-      }
-
-      debug('resolveRelation cond', cond);
-      return this.query.bind(this, Object.assign(params, cond), _, args)();
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  /**
-   * Resolve connection
-   *
-   * @param params
-   * @param _
-   * @param args
-   * @param ctx
-   */
-  async resolveConnection(params, _, args, ctx) {
-    debug(' >>> resolveConnection >>>', params, _, args);
-    let items = await this.resolveRelation(params, _, args, ctx);
-    debug('resolveConnection items', items);
-
-    return items;
   }
 }

@@ -417,6 +417,40 @@ export default class Model {
   }
 
   /**
+   * Handles READ acl and applies scope conditions if needed
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async handleReadACL(result, next, options, _, args, ctx) {
+    debug('handleReadACL');
+    // Handles ACL
+    if (!this.schema.acls || !this.schema.acls.length) {
+      debug('no acls defined');
+      return next();
+    }
+
+    next();
+
+    // Parse/Filter ACL
+
+    // Analyze ACL rules in context of type of the query we are trying to perform
+    // e.g. for allItems we might want to fetch all parent items in order to filter
+    // actual query
+
+    // Perform additional queries (get parent etc)
+
+    // Apply filters for actual query
+
+    // Set after read callbacks? Complex ACL scopes handling
+  }
+
+  /**
    * Based on action, roles and ACL rules returns map of allowed fields to access
    *
    * @param action
@@ -617,6 +651,22 @@ export default class Model {
 
   }
 
+
+  /**
+   * Get read chain
+   *
+   * @returns {[*,*,*,*]}
+   */
+  getReadChain() {
+    return [
+      this.handleReadACL,
+      this.beforeRead,
+      this.processRead,
+      // TODO: afterReadACL handling?
+      this.afterRead
+    ]
+  }
+
   /**
    * Get create chain
    *
@@ -666,9 +716,10 @@ export default class Model {
    * Process chain
    *
    * @param chain
-   * @returns {*}
+   * @param args
+   * @returns {Promise.<{}>}
    */
-  async processChain(chain, opts, input, ctx) {
+  async processChain(chain, ...args) {
     debug('processChain');
 
     let result = {};
@@ -680,7 +731,7 @@ export default class Model {
 
     for (let fn of chain) {
       debug('chain iteration');
-      await fn.bind(this, result, next, opts, input, ctx)();
+      await fn.bind(this, result, next, ...args)();
 
       if (!isNext) {
         debug('no isNext. Return result', result);
@@ -841,38 +892,11 @@ export default class Model {
   /**
    * Query
    *
-   * @param params
+   * @param options
    * @param _
    * @param args
    */
-  async query(params = {}, _, args) {
-    debug('query init', params);
-
-    let query = this.argsToConditions(args);
-
-    debug('argsToConditions result', query);
-
-    if (params.query) {
-      query = Object.assign(query, params.query);
-    }
-
-    let method = params.method ? params.method : 'find';
-
-    debug('query', this, this.model);
-
-    let cursor = this.model[method](query);
-    cursor.sort(this.argsToSort(args));
-
-    if (params.type == 'connection') {
-      debug('query, type - connection');
-      cursor = connectionFromMongooseQuery(cursor, args);
-    }
-
-    let res = await cursor;
-
-    debug('query result', res);
-    return res;
-  }
+  async query(options = {}, _, args) {}
 
   /**
    * Converts args to conditions
@@ -1096,96 +1120,110 @@ export default class Model {
   }
 
   /**
-   * Alias for single item resolve
+   * Entrypoint for resolving single item
    *
-   * @param params
+   * @param options
    * @param _
    * @param args
    * @param ctx
    * @returns {{}}
    */
-  async resolveOne(params, _, args, ctx) {
-    return this.resolveItem(params, _, args, ctx);
+  async resolveOne(options, _, args, ctx) {
+    return this.resolveItem(options, _, args, ctx);
   }
 
   /**
-   * Transform relation to additional condition and fetch data
+   * Entrypoint for resolving belongsTo relation
    *
-   * @param params
-   * @param _
-   * @param args
-   */
-  //async resolveRelation(field, _, args) {
-  //  try {
-  //    debug('resolveRelation', field, _);
-  //
-  //    let cond = {};
-  //    if (field.relation == 'hasMany') {
-  //      cond = { query: {[field.foreignKey]: _._id} };
-  //    }
-  //
-  //    if (field.relation == 'belongsTo') {
-  //      // Belongs to probably will not include any additional conditions
-  //
-  //      cond = { method: 'findOne', query: { _id: _[field.foreignKey] } }
-  //    }
-  //
-  //    debug('resolveRelation cond', cond);
-  //    return this.query.bind(this, cond, _, args)();
-  //  } catch (err) {
-  //    console.error(err);
-  //  }
-  //}
-  async resolveRelation(params, _, args, ctx) {
-    try {
-      let field = params.field;
-
-      let dataLoader = ctx.state.dataLoaders[this.getName()];
-
-      debug('resolveRelation - dataLoader', dataLoader);
-
-      debug('resolveRelation', field, _);
-
-      let cond = {};
-      if (field.relation == 'hasMany') {
-        cond = { query: {[field.foreignKey]: _._id} };
-      }
-
-      if (field.relation == 'belongsTo') {
-        // Belongs to probably will not include any additional conditions
-        let id = _[field.foreignKey];
-
-        // TODO: temp
-        //if (dataLoader) {
-        //  debug('dataloader exists - loading id', id);
-        //  return dataLoader.load(id) // TODO: anyway we need somehow pass fields list and etc
-        //} else {
-        //  debug('No data loader');
-        //}
-
-        cond = { method: 'findOne', query: { _id: id } }
-      }
-
-      debug('resolveRelation cond', cond);
-      return this.query.bind(this, Object.assign(params, cond), _, args)();
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  /**
-   * Resolve connection
-   *
-   * @param params
+   * @param options
    * @param _
    * @param args
    * @param ctx
    */
-  async resolveConnection(params, _, args, ctx) {
-    debug(' >>> resolveConnection >>>', params, _, args);
-    let items = await this.resolveRelation(params, _, args, ctx);
-    debug('resolveConnection items', items);
+  resolveBelongsTo(options, _, args, ctx) {
+    // TODO
+  }
 
-    return items;
+  /**
+   * Entrypoint for resolving allItems
+   *
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<{}>}
+   */
+  async resolveAll(options, _, args, ctx) {
+    debug('resolveAll', options);
+    return (await this.processChain(this.getReadChain(), ...arguments)).result;
+  }
+
+  /**
+   * Entrypoint for resolving hasMany
+   *
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<{}>}
+   */
+  async resolveHasMany(options, _, args, ctx) {
+    debug('resolveHasMany', options);
+
+    // Specifying additional condition
+    options.query = {
+      [options.property.foreignKey]: _._id
+    };
+
+    return (await this.processChain(this.getReadChain(), ...arguments)).result;
+  }
+
+  /**
+   * Before read
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async beforeRead(result, next, options, _, args, ctx) {
+    debug('beforeRead');
+    next();
+  }
+
+  /**
+   * Process read
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async processRead(result, next, options, _, args, ctx) {
+    debug('processRead');
+    result.result = await this.query.bind(this, options, _, args)();
+    next();
+  }
+
+  /**
+   * After read
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async afterRead(result, next, options, _, args, ctx) {
+    debug('afterRead', result);
+    next();
   }
 }

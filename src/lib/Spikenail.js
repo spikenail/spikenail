@@ -496,10 +496,8 @@ class Spikenail extends EventEmitter {
       }),
       args: this.models[name].getGraphqlListArgs(),
       resolve: (function(_, args) {
-        // TODO: not sure what is going on
-        return this.models[name].resolveList({
-          type: 'connection',
-          // field: field
+        return this.models[name].resolveAll({
+          //property: field
         }, ...arguments);
       }).bind(this)
     };
@@ -574,25 +572,9 @@ class Spikenail extends EventEmitter {
             }),
             args: this.models[field.ref].getGraphqlListArgs(),
             resolve: (function(_, args) {
-              return this.models[field.ref].resolveConnection({
-                type: 'connection',
-                field: field
+              return this.models[field.ref].resolveHasMany({
+                property: field
               }, ...arguments);
-            }).bind(this)
-          };
-        } else {
-          // Non relay behaviour
-          // TODO: check how it should be implemented in relay
-          fields[prop] = {
-            type: type,
-            resolve: (function(_, args) {
-              //return this.models[field.ref].resolveRelation(field, ...arguments);
-
-              return this.models[field.ref].resolve({
-                type: 'relation',
-                field: field
-              }, ...arguments);
-
             }).bind(this)
           };
         }
