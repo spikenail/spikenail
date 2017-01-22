@@ -318,6 +318,8 @@ Spikenail is based on koa2.
 
 ## ACL
 
+### Dynamic and static roles
+
 ## License
 
 MIT © [Igor Lesnenko](http://github.com/spikenail)

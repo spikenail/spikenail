@@ -435,19 +435,168 @@ export default class Model {
       return next();
     }
 
+    if (options.actionType == 'all') {
+      return await this.handleReadAllACL(...arguments);
+    }
+
+    if (options.actionType == 'hasMany') {
+
+    }
+
+    if (options.actionType == 'one') {
+
+    }
+
+    if (options.actionType == 'belongsTo') {
+
+    }
+
     next();
+  }
 
-    // Parse/Filter ACL
+  /**
+   * Read all items ACL
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   */
+  async handleReadAllACL(result, next, options, _, args, ctx) {
+    debug('handleReadAllACL');
+    let acls = this.schema.acls;
 
-    // Analyze ACL rules in context of type of the query we are trying to perform
-    // e.g. for allItems we might want to fetch all parent items in order to filter
-    // actual query
+    debug('source acls', acls);
 
-    // Perform additional queries (get parent etc)
+    // Lets get user roles.
+    let roles = await this.getStaticRoles(ctx);
 
-    // Apply filters for actual query
+    debug('staticRoles', roles);
 
-    // Set after read callbacks? Complex ACL scopes handling
+    // TODO: first of all apply default values - make it once on models initialization step
+
+    // TODO: Before filtering ACL rules - handle injecting of relation rules
+
+    // Some roles are depends on the object
+    let filteredAcls = acls
+      .filter(this.isRuleMatchAction('read'))
+      .filter(this.isRuleHasPossibleRole(ctx));
+
+    debug('filtered acls', filteredAcls);
+
+    // TODO: analyze and apply
+
+    next();
+  }
+
+  /**
+   * Filters ACL rules by action
+   *
+   * @param action
+   * @returns {Function}
+   */
+  isRuleMatchAction(action) {
+    return function(rule) {
+      debug('isRuleMatchAction', action, rule);
+      if (!~rule.actions.indexOf('*') && !~rule.actions.indexOf(action)) {
+        debug('false');
+        return false;
+      }
+
+      debug('true');
+      return true;
+    }
+  }
+
+  /**
+   * Left only rules that matches current static roles or all possible dynamic roles
+   *
+   * @param ctx
+   * @returns {Function}
+   */
+  isRuleHasPossibleRole(ctx) {
+    return (function(rule) {
+      debug('isRuleHasPossibleRole', rule);
+      let dynamicRoles = (!this.isDependentRule(rule))
+        ? this.getDynamicRoleNames(ctx)
+        : this.getDependentModel(rule).getDynamicRoleNames(ctx);
+
+
+      debug('dynamic roles', dynamicRoles);
+      let roles = dynamicRoles.concat(this.getStaticRoles(ctx));
+
+      debug('possible roles', roles);
+
+      if (!~rule.roles.indexOf('*') && !rule.roles.filter(r => ~roles.indexOf(r)).length) {
+        debug('false');
+        return false;
+      }
+
+      debug('true');
+      return true;
+    }).bind(this);
+  }
+
+  /**
+   * Check if rule depends on another model
+   *
+   * @param rule
+   * @returns {boolean}
+   */
+  isDependentRule(rule) {
+    debug('isDependentRule');
+    return !!rule.checkRelation;
+  }
+
+  /**
+   * Get model that rule depends on
+   * @param rule
+   * @returns {*}
+   */
+  getDependentModel(rule) {
+    debug('getDependentModel');
+    return Spikenail.models[rule.checkRelation];
+  }
+
+  /**
+   * Returns roles that don't depends on anything but user
+   * Anonymous, User, roles taken directly from the database for particular user
+   * Override this method to add custom role fetching logic
+   *
+   * @returns {Promise.<void>}
+   */
+  async getStaticRoles(ctx) {
+    let currentUser = this.getCurrentUserFromContext(ctx);
+    if (!currentUser) {
+      return ['anonymous'];
+    }
+
+    return ['user'];
+  }
+
+
+  /**
+   * Get dynamic roles
+   */
+  getDynamicRoles(ctx) {
+    // Owner is predefined custom role
+    let roles = {
+      owner: {
+        cond: (ctx) => { userId: ctx.currentUser }
+      }
+    };
+
+    return Object.assign(roles, this.schema.roles || {} );
+  }
+
+  /**
+   * Get dynamic role names
+   * @returns {Array}
+   */
+  getDynamicRoleNames(ctx) {
+    return Object.keys(this.getDynamicRoles(ctx));
   }
 
   /**
@@ -1154,6 +1303,7 @@ export default class Model {
    * @returns {Promise.<{}>}
    */
   async resolveAll(options, _, args, ctx) {
+    options.actionType = 'all';
     debug('resolveAll', options);
     return (await this.processChain(this.getReadChain(), ...arguments)).result;
   }
@@ -1168,12 +1318,14 @@ export default class Model {
    * @returns {Promise.<{}>}
    */
   async resolveHasMany(options, _, args, ctx) {
-    debug('resolveHasMany', options);
-
     // Specifying additional condition
     options.query = {
       [options.property.foreignKey]: _._id
     };
+
+    options.actionType = 'hasMany';
+
+    debug('resolveHasMany', options);
 
     return (await this.processChain(this.getReadChain(), ...arguments)).result;
   }
