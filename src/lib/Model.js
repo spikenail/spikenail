@@ -1,5 +1,7 @@
 const debug = require('debug')('spikenail:Model');
 
+const clone = require('lodash.clone');
+
 import mongoose from 'mongoose';
 
 import Spikenail from './Spikenail';
@@ -471,24 +473,380 @@ export default class Model {
     debug('source acls', acls);
 
     // Lets get user roles.
-    let roles = await this.getStaticRoles(ctx);
-
-    debug('staticRoles', roles);
+    //let roles = await this.getStaticRoles(ctx);
+    //debug('staticRoles', roles);
 
     // TODO: first of all apply default values - make it once on models initialization step
 
     // TODO: Before filtering ACL rules - handle injecting of relation rules
+    let staticRoles = this.getStaticRoles(ctx);
 
     // Some roles are depends on the object
+    // Modify and filter ACLs according to current request
     let filteredAcls = acls
       .filter(this.isRuleMatchAction('read'))
-      .filter(this.isRuleHasPossibleRole(ctx));
+      .map(this.removeImpossibleRoles.bind(this, ctx))
+      .map(this.markAsDeferred.bind(this, staticRoles))
+      .filter(rule => !!rule.roles.length);
 
     debug('filtered acls', filteredAcls);
 
-    // TODO: analyze and apply
+    let accessMap = await this.applyRulesOnProps(filteredAcls, ctx);
+
+    // Now we have to analyze resulting access map.
+    // TODO: Optimization: first of ALL we have to subtract Requested fields
+    // TODO: because we probably don't need to execute deferred actions
+
+    // Build query from access map
+    let query = await this.accessMapToQuery(accessMap, ctx);
+
+    debug('resulting query', query);
+
+    if (!query) {
+      debug('no query was produced');
+      return next();
+    }
+
+    // TODO: but this query does not mean it should be applied as AND query.
+    // so what algorithm should be
+    // If in access map ONLY affected by Queries values then it should be applied
+    // Otherwise - not. We will need it only in the end of request - to strip fields according
+    // well... actually we probably don't need to generate query (?)
 
     next();
+  }
+
+  /**
+   * Access map to query
+   *
+   * @param accessMap
+   * @param ctx
+   * @returns {Promise.<*>}
+   */
+  async accessMapToQuery(accessMap, ctx) {
+    //let staticQuery = this.accessMapToStaticQuery(accessMap);
+
+    debug('accessMapToQuery');
+
+    let queries = {};
+
+    for (let rule of Object.values(accessMap)) {
+
+      debug('iterating rule of accessMap', rule);
+
+      if (typeof(rule) === "boolean") {
+        debug('rule type is boolean - continue');
+        continue;
+      }
+
+      // "id" is a helper field defined before
+      // we should convert rule to query only once
+      if (queries[rule.id]) {
+        debug('rule already converted - skip');
+      }
+
+      queries[rule.id] = this.ruleToQuery(rule, ctx);
+    }
+
+    queries = Object.values(queries);
+
+    debug('Resulting queries array', queries);
+
+    if (!queries.length) {
+      debug('No queries');
+      return null;
+    }
+
+    // TODO: Probably use something like conditionsToOrQuery
+    if (queries.length > 1) {
+      return { '$or': queries };
+    }
+
+    return queries[0];
+  }
+
+  /**
+   * Converts rule to query condition
+   *
+   * @param rule
+   * @param ctx
+   */
+  ruleToQuery(rule, ctx) {
+    debug('ruleToQuery', rule);
+
+    let model = this.isDependentRule(rule) ? this.getDependentModel(rule) : this;
+    let query = {};
+
+    if (rule.scope) {
+      debug('scope exists', rule.scope);
+      // TODO: what arguments?
+      query = rule.scope();
+      debug('scope query', query);
+    }
+
+    // Check if dynamic roles are possible for model
+    // In most cases it make no sense as "owner" role will possibly always exists
+    if (!model.roles) {
+      debug('no model roles');
+      return query;
+    }
+
+    let conds = [];
+    // Finding only dynamic roles
+    for (let roleName of rule.roles) {
+      debug('iterating rule role:', roleName);
+      let role = model.roles[roleName];
+      if (!role) {
+        debug('Role not in possible dynamic roles');
+        continue;
+      }
+
+      debug('found dynamic role definition:', role);
+      // Execute handler
+      // TODO: could it be async? On what data it depends? Should we execute it multiple times?
+
+      let cond = Object.assign(role.cond(ctx), query);
+      debug('calculated cond + query', cond);
+      conds.push(cond);
+    }
+
+    debug('OR Conditions', conds);
+
+    let result = {};
+
+    // check if more than one condition
+    if (conds.length > 1) {
+      result = { '$or': conds }
+    } else {
+      result = conds[0];
+    }
+
+    debug('resulting condition', result);
+
+    return result;
+  }
+
+  /**
+   *
+   * @param accessMap
+   */
+  accessMapToStaticQuery(accessMap) {
+
+  }
+
+  /**
+   * Left only rules that matches current static roles or all possible dynamic roles
+   *
+   * @deprecated
+   *
+   * @param ctx
+   * @returns {Function}
+   */
+  isRuleHasPossibleRole(ctx) {
+    return (function(rule) {
+      debug('isRuleHasPossibleRole', rule);
+
+      // TODO: what to do with owner role
+      // TODO: what to do with multiple roels
+      let dynamicRoles = !this.isDependentRule(rule)
+        ? this.getDynamicRoleNames(ctx)
+        : this.getDependentModel(rule).getDynamicRoleNames(ctx);
+
+      debug('dynamic roles', dynamicRoles);
+      let roles = dynamicRoles.concat(this.getStaticRoles(ctx));
+
+      debug('possible roles', roles);
+
+      // TODO we have to trim impossible roles
+      // and if roles become empty - we are deleting this Rule completely
+      //
+      if (!~rule.roles.indexOf('*') && !rule.roles.filter(r => ~roles.indexOf(r)).length) {
+        debug('false');
+        return false;
+      }
+
+      debug('true');
+
+      return true;
+    }).bind(this);
+  }
+
+  /**
+   * Remove impossible roles
+   *
+   * @param ctx
+   * @param sourceRule
+   */
+  removeImpossibleRoles(ctx, sourceRule) {
+    debug('remove impossible roles, sourceRule:', sourceRule);
+
+    let rule = clone(sourceRule);
+
+    // 1. Get possible roles:
+    // all possible (defined) dynamic roles + static roles of current user
+
+    // Get dynamic roles for model from current model or related
+    let dynamicRoles = this.isDependentRule(rule)
+      ? this.getDependentModel(rule).getDynamicRoleNames(ctx)
+      : this.getDynamicRoleNames(ctx);
+    debug('dynamicRoles', dynamicRoles);
+
+    // Get static roles that based on currentUser stored in context
+    let staticRoles = this.getStaticRoles(ctx);
+    debug('staticRoles', staticRoles);
+
+    // If rule * exists - left only it
+    if (~rule.roles.indexOf('*')) {
+      rule.roles = ['*'];
+      debug('Match * role, result', rule);
+      return rule;
+    }
+
+    // Try to match static roles
+    let matchedStaticRoles = this.getMatchedRoles(rule, staticRoles);
+    if (matchedStaticRoles.length) {
+      // If static roles matched - left only one matched static role
+      // This way we just trim redundant roles
+      rule.roles = [matchedStaticRoles[0]];
+
+      debug('Match static roles, result', rule);
+
+      return rule;
+    }
+
+    // no static roles are matched
+    // theoretically only dynamic roles left
+    let matchedDynamicRoles = this.getMatchedRoles(rule, dynamicRoles);
+    if (matchedDynamicRoles.length) {
+      // left only dynamic roles
+      // TODO: this is probably redundant
+      // TODO: A invalid roles should be filtered on initialization step
+      rule.roles = matchedDynamicRoles;
+      debug('Match dynamic roles, result', rule);
+      return rule;
+    }
+
+    rule.roles = [];
+
+    debug('Not match any role, result', rule);
+
+    return rule;
+  }
+
+
+  /**
+   * Set deferred property of the rule
+   * Deferred indicates if rule could be applied immediately or
+   * requires to get some additional data
+   *
+   * @param staticRoles
+   * @param sourceRule
+   */
+  markAsDeferred(staticRoles, sourceRule) {
+
+    // Rule might be deferred or static
+    // Rule is deferred if it has scope or it has dynamic role
+    // Otherwise rule is static
+
+    // The method assumes that all rules are filtered from redundant or incorrect values
+    // If rule has scope or not match static rule or *
+
+    debug('mark as deferred', sourceRule);
+    let rule = clone(sourceRule);
+
+    if (rule.scope || (!~rule.roles.indexOf('*') && !this.isRuleMatchRoles(rule, staticRoles))) {
+      debug('rule is deferred');
+      rule.deferred = true;
+    } else {
+      debug('rule is static');
+      rule.deferred = false;
+    }
+
+    return rule;
+  }
+
+  /**
+   * Check if rule match any of given roles
+   *
+   * @param rule
+   * @param roles
+   * @returns {boolean}
+   */
+  isRuleMatchRoles(rule, roles) {
+    return !!rule.roles.filter(r => ~roles.indexOf(r)).length;
+  }
+
+
+  /**
+   * Match rule with "roles" and return array of matched rule roles
+   *
+   * @param rule
+   * @param roles
+   * @returns {Array.<T>}
+   */
+  getMatchedRoles(rule, roles) {
+    return rule.roles.filter(r => ~roles.indexOf(r));
+  }
+
+  /**
+   * Applies ACL rules on properties
+   * Might be deferred
+   *
+   * @returns {Promise.<void>}
+   */
+  async applyRulesOnProps(acls, ctx) {
+    // getDeferredMap
+    // think later what name of the function and args are better
+    debug('Applying rules on props');
+
+    // Initialize the access map of properties
+    // By default, everything is allowed
+    let accessMap = {};
+    // TODO: think - should we include relation properties
+    // TODO: default behaviour - no restrictions
+    Object.keys(this.schema.properties).forEach(field => {
+      accessMap[field] = true;
+    });
+
+    debug('Iterating filtered acls');
+
+    // New algorithm
+    let staticRoles = this.getStaticRoles(ctx);
+    //let dynamicRoles = this.getDynamicRoles(ctx);
+    for (let [index, rule] of acls.entries()) {
+      debug('iterating rule', index, rule);
+
+      let applyValue = rule.allow;
+
+      if (rule.deferred === true)  {
+        applyValue = clone(rule);
+        // Set temporary id in order to simplify further calculations
+        applyValue.id = index;
+      }
+
+      debug('applyValue:', applyValue);
+
+      // TODO: quick fix. move it to initialization step
+      if (!rule.properties)  {
+        rule.properties = ['*'];
+      }
+
+      for (let prop of rule.properties) {
+        debug('iterating rule properties');
+        if (prop == '*') {
+          for (let prop of Object.keys(accessMap)) {
+            accessMap[prop] = applyValue;
+          }
+          break;
+        }
+        accessMap[prop] = applyValue
+      }
+
+    }
+
+    debug('resulting accessMap', accessMap);
+
+    return accessMap;
   }
 
   /**
@@ -510,34 +868,6 @@ export default class Model {
     }
   }
 
-  /**
-   * Left only rules that matches current static roles or all possible dynamic roles
-   *
-   * @param ctx
-   * @returns {Function}
-   */
-  isRuleHasPossibleRole(ctx) {
-    return (function(rule) {
-      debug('isRuleHasPossibleRole', rule);
-      let dynamicRoles = (!this.isDependentRule(rule))
-        ? this.getDynamicRoleNames(ctx)
-        : this.getDependentModel(rule).getDynamicRoleNames(ctx);
-
-
-      debug('dynamic roles', dynamicRoles);
-      let roles = dynamicRoles.concat(this.getStaticRoles(ctx));
-
-      debug('possible roles', roles);
-
-      if (!~rule.roles.indexOf('*') && !rule.roles.filter(r => ~roles.indexOf(r)).length) {
-        debug('false');
-        return false;
-      }
-
-      debug('true');
-      return true;
-    }).bind(this);
-  }
 
   /**
    * Check if rule depends on another model
@@ -563,11 +893,13 @@ export default class Model {
   /**
    * Returns roles that don't depends on anything but user
    * Anonymous, User, roles taken directly from the database for particular user
-   * Override this method to add custom role fetching logic
+   * Override this method to add custom logic
+   * Function should be synchronous. Current user and its static roles should be fetched once.
    *
-   * @returns {Promise.<void>}
+   * @param ctx
+   * @returns {[string]}
    */
-  async getStaticRoles(ctx) {
+  getStaticRoles(ctx) {
     let currentUser = this.getCurrentUserFromContext(ctx);
     if (!currentUser) {
       return ['anonymous'];
