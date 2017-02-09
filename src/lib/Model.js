@@ -1,6 +1,9 @@
 const debug = require('debug')('spikenail:Model');
 
 const clone = require('lodash.clone');
+const isPlainObject = require('lodash.isplainobject');
+
+const md5 = require('md5');
 
 import mongoose from 'mongoose';
 
@@ -491,7 +494,7 @@ export default class Model {
 
     debug('filtered acls', filteredAcls);
 
-    let accessMap = await this.applyRulesOnProps(filteredAcls, ctx);
+    let accessMap = await this.buildAccessMap(filteredAcls, ctx);
 
     // Now we have to analyze resulting access map.
     // TODO: Optimization: first of ALL we have to subtract Requested fields
@@ -500,18 +503,23 @@ export default class Model {
     // Build query from access map
     let query = await this.accessMapToQuery(accessMap, ctx);
 
-    debug('resulting query', query);
+    debug('resulting query %j', query);
 
     if (!query) {
       debug('no query was produced');
       return next();
     }
 
-    // TODO: but this query does not mean it should be applied as AND query.
-    // so what algorithm should be
-    // If in access map ONLY affected by Queries values then it should be applied
-    // Otherwise - not. We will need it only in the end of request - to strip fields according
-    // well... actually we probably don't need to generate query (?)
+    // The query should not be applied if there is at least one property with allow: true
+    let shouldApplyQuery = true;
+    for (let allow of Object.values(accessMap)) {
+      if (allow === true) {
+        shouldApplyQuery = false;
+        break;
+      }
+    }
+
+    debug('shouldApplyQuery', shouldApplyQuery);
 
     next();
   }
@@ -530,22 +538,26 @@ export default class Model {
 
     let queries = {};
 
-    for (let rule of Object.values(accessMap)) {
+    for (let ruleSet of Object.values(accessMap)) {
 
-      debug('iterating rule of accessMap', rule);
+      debug('iterating rule of accessMap', ruleSet);
 
-      if (typeof(rule) === "boolean") {
+      if (typeof(ruleSet) === "boolean") {
         debug('rule type is boolean - continue');
         continue;
       }
 
-      // "id" is a helper field defined before
-      // we should convert rule to query only once
-      if (queries[rule.id]) {
-        debug('rule already converted - skip');
+      // calculate unique rule set hash
+      let hash = this.toHash(ruleSet);
+      debug('ruleSet hash', hash);
+
+      // we should convert rule set to query only once
+      if (queries[hash]) {
+        debug('rules already converted - skip');
+        continue;
       }
 
-      queries[rule.id] = this.ruleToQuery(rule, ctx);
+      queries[hash] = this.ruleSetToQuery(ruleSet, ctx);
     }
 
     queries = Object.values(queries);
@@ -566,72 +578,200 @@ export default class Model {
   }
 
   /**
-   * Converts rule to query condition
-   *
-   * @param rule
-   * @param ctx
+   * To hash
+   * @param data
    */
-  ruleToQuery(rule, ctx) {
-    debug('ruleToQuery', rule);
-
-    let model = this.isDependentRule(rule) ? this.getDependentModel(rule) : this;
-    let query = {};
-
-    if (rule.scope) {
-      debug('scope exists', rule.scope);
-      // TODO: what arguments?
-      query = rule.scope();
-      debug('scope query', query);
-    }
-
-    // Check if dynamic roles are possible for model
-    // In most cases it make no sense as "owner" role will possibly always exists
-    if (!model.roles) {
-      debug('no model roles');
-      return query;
-    }
-
-    let conds = [];
-    // Finding only dynamic roles
-    for (let roleName of rule.roles) {
-      debug('iterating rule role:', roleName);
-      let role = model.roles[roleName];
-      if (!role) {
-        debug('Role not in possible dynamic roles');
-        continue;
-      }
-
-      debug('found dynamic role definition:', role);
-      // Execute handler
-      // TODO: could it be async? On what data it depends? Should we execute it multiple times?
-
-      let cond = Object.assign(role.cond(ctx), query);
-      debug('calculated cond + query', cond);
-      conds.push(cond);
-    }
-
-    debug('OR Conditions', conds);
-
-    let result = {};
-
-    // check if more than one condition
-    if (conds.length > 1) {
-      result = { '$or': conds }
-    } else {
-      result = conds[0];
-    }
-
-    debug('resulting condition', result);
-
-    return result;
+  toHash(data) {
+    return md5(JSON.stringify(data));
   }
 
   /**
+   * Converts ruleSet to query condition
    *
-   * @param accessMap
+   * @param ruleSet
+   * @param ctx
    */
-  accessMapToStaticQuery(accessMap) {
+  ruleSetToQuery(ruleSet, ctx) {
+    debug('ruleSetToQuery', ruleSet);
 
+    // Lets expand each rule in rule set
+    // That mean convert role to condition and merge it with scope
+    // Build queries set. Convert each individual rule to query
+    let queriesSet = ruleSet.map((rule) => {
+
+      let model = this.isDependentRule(rule) ? this.getDependentModel(rule) : this;
+      debug('building queries set');
+      //debug('model', this);
+
+      let query = {};
+
+      if (rule.scope) {
+        debug('scope exists', rule.scope);
+        // TODO: what arguments?
+        query = rule.scope();
+        debug('scope query', query);
+      }
+
+      // TODO: handle * in some other way?
+      if (!rule.roles || rule.roles[0] == '*') {
+        debug('no rule roles or *');
+        return {
+          allow: rule.allow,
+          query: query
+        };
+      }
+
+      let conds = [];
+      // Finding only dynamic roles
+      for (let roleName of rule.roles) {
+        debug('iterating rule role:', roleName);
+        let role = model.schema.roles ? model.schema.roles[roleName] : null;
+
+        if (!role) {
+          // TODO: it shouldn't ever happen because we filtered it earlier
+          debug('Role not in possible dynamic roles');
+          continue;
+        }
+
+        debug('found dynamic role definition:', role);
+        // Execute handler
+        // TODO: could it be async? On what data it depends? Should we execute it multiple times?
+
+        let cond = Object.assign(role.cond(ctx), query);
+        debug('calculated cond + query', cond);
+        conds.push(cond);
+      }
+
+      debug('OR Conditions', conds);
+
+      let result = {};
+
+      // check if more than one condition
+      if (conds.length > 1) {
+        result = { '$or': conds }
+      } else {
+        result = conds[0];
+      }
+
+      debug('resulting condition', result);
+
+      return {
+        allow: rule.allow,
+        query: result
+      };
+    });
+    debug('RESULTING QUERIES SET', queriesSet);
+
+    // Lets merge all queries set to single query
+    let mergedQuery = {};
+    let toQuery = function(next, arr) {
+      let item = arr.pop();
+
+      let key = '$or';
+      let query = item.query;
+      if (!item.allow) {
+        key = '$and';
+        let query = this.invertMongoQuery(item.query);
+      }
+
+      // If last item
+      if (!arr.length) {
+        Object.assign(next, query);
+        return;
+      }
+
+      let newNext = {};
+      next[key] =[newNext, query];
+
+      toQuery(newNext, arr);
+    };
+
+    toQuery(mergedQuery, queriesSet.slice(0));
+
+    debug('mergedQuery', mergedQuery);
+
+    return mergedQuery;
+  }
+
+  /**
+   * Invert mongodb query. Not all queries are supported.
+   * One should avoid specifying a condition with { "allow": false }
+   * as automatic inversion might give unexpected result
+   *
+   * TODO: move to separate npm module
+   * TODO: ( { qty: { $exists: true, $nin: [ 5, 15 ] } } )
+   * TODO: invert $not
+   *
+   * @param sourceQuery
+   */
+  invertMongoQuery(sourceQuery) {
+    let invertedQuery = {};
+
+    for (let key of Object.keys(sourceQuery)) {
+      //debug('iterate key', key);
+      let val = sourceQuery[key];
+
+      if (key.startsWith('$')) {
+        if (key == '$and') {
+          // Invert every item
+          // wrap into $nor
+          invertedQuery['$nor'] = [{
+            '$and': val
+          }];
+        } else if (key == '$or') {
+          // change to $nor
+          invertedQuery['$nor'] = val;
+        } else {
+          throw new Error('Can not invert query. Unsupported top-level operator');
+        }
+
+
+        continue;
+      }
+
+
+      // Operator replace map
+      /*
+        Note that: { $not: { $gt: 1.99 } } is different from the $lte operator
+
+        db.inventory.find( { price: { $not: { $gt: 1.99 } } } )
+        This query will select all documents in the inventory collection where:
+
+        the price field value is less than or equal to 1.99 or
+        the price field does not exist
+
+        This way it is better to avoid $not
+       */
+      let replaceMap = {
+        '$in': '$nin',
+        '$nin': '$in',
+        '$gt': '$lte',
+        '$lte': '$gt',
+        '$lt': '$gte',
+        '$gte': '$lt',
+        '$ne': '$eq'
+      };
+
+      // Check if field value is expression
+      if (isPlainObject(val) && Object.keys(val)[0].startsWith('$')) {
+        let operator = Object.keys(val)[0];
+        // If possible, try to replace operator
+        if (replaceMap[operator]) {
+          invertedQuery[key] = {
+            [replaceMap[operator]]: val[operator]
+          };
+          continue;
+        }
+
+        // TODO: can we do more? Wrap into $not for example
+        throw new Error('Can not invert query. Unsupported operators', sourceQuery);
+      } else {
+        // For non objects use $ne to invert value
+        invertedQuery[key] = { '$ne': val };
+      }
+    }
+
+    return invertedQuery;
   }
 
   /**
@@ -791,10 +931,13 @@ export default class Model {
   /**
    * Applies ACL rules on properties
    * Might be deferred
+   * TODO: cond function could return static value - e.g. false, or true.
+   * TODO: if, for example, user is anonymous
+   * TODO: think later how it should be implemented
    *
    * @returns {Promise.<void>}
    */
-  async applyRulesOnProps(acls, ctx) {
+  async buildAccessMap(acls, ctx) {
     // getDeferredMap
     // think later what name of the function and args are better
     debug('Applying rules on props');
@@ -818,7 +961,8 @@ export default class Model {
 
       let applyValue = rule.allow;
 
-      if (rule.deferred === true)  {
+      // deferred - helper property that set earlier
+      if (rule.deferred === true) {
         applyValue = clone(rule);
         // Set temporary id in order to simplify further calculations
         applyValue.id = index;
@@ -835,11 +979,13 @@ export default class Model {
         debug('iterating rule properties');
         if (prop == '*') {
           for (let prop of Object.keys(accessMap)) {
-            accessMap[prop] = applyValue;
+            accessMap[prop] = this.getNewApplyValue(accessMap[prop], applyValue);
           }
           break;
         }
-        accessMap[prop] = applyValue
+
+        // We have to check current value
+        accessMap[prop] = this.getNewApplyValue(accessMap[prop], applyValue)
       }
 
     }
@@ -847,6 +993,42 @@ export default class Model {
     debug('resulting accessMap', accessMap);
 
     return accessMap;
+  }
+
+  /**
+   * Get new apply value
+   *
+   * @param prevValue
+   * @param applyValue
+   */
+  getNewApplyValue(prevValue, applyValue) {
+    debug('getNewApplyValue', prevValue, applyValue);
+    // Algorithm that applies value on access map property
+
+    // If strict value just apply as is
+    if (typeof(applyValue) === "boolean") {
+      debug('strict boolean');
+      return applyValue;
+    }
+
+    // If value with conditions lets check previous value
+    // If previous value is also condition then append this condition
+    if (Array.isArray(prevValue)) {
+      debug('append');
+      prevValue.push(applyValue);
+      return prevValue;
+    }
+
+    // If previous value is boolean
+    // Replace it with apply value only if it invert allow value
+    if (prevValue !== applyValue.allow) {
+      debug('prevValue is different from deferred value - set deferred');
+      return [applyValue];
+    }
+
+    // Otherwise return prev value
+    debug('deferred value does not override prev value - keep prev value');
+    return prevValue;
   }
 
   /**
@@ -933,6 +1115,8 @@ export default class Model {
 
   /**
    * Based on action, roles and ACL rules returns map of allowed fields to access
+   *
+   * This method is currently used only for Create, delete, update actions and will be replaced
    *
    * @param action
    * @param roles
