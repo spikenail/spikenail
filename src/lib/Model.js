@@ -497,8 +497,14 @@ export default class Model {
     let accessMap = await this.buildAccessMap(filteredAcls, ctx);
 
     // Now we have to analyze resulting access map.
-    // TODO: Optimization: first of ALL we have to subtract Requested fields
+    // TODO: Optimization: first of ALL we have to subtract Requested fields - propbbly before building map
     // TODO: because we probably don't need to execute deferred actions
+
+    // Check if all access map is false
+    if (this.isAccessMapFails(accessMap)) {
+      debug('access map fails - interrupt execution');
+      return;
+    }
 
     // Build query from access map
     let query = await this.accessMapToQuery(accessMap, ctx);
@@ -521,7 +527,38 @@ export default class Model {
 
     debug('shouldApplyQuery', shouldApplyQuery);
 
+    if (!shouldApplyQuery) {
+      debug('we should not apply query for now - go next');
+      return next();
+    }
+
+    debug('apply query');
+
+    // TODO 2: Apply query after result is fetched
+    // As conditions could control different set of fields
+
+    // Apply query
+    options.query = Object.assign(options.query || {}, query);
+
+    debug('applied query', options.query);
+
     next();
+  }
+
+  /**
+   * Check that all elements of access map equals false
+   *
+   * @param accessMap
+   */
+  isAccessMapFails(accessMap) {
+    debug('isAccessMapFails', accessMap);
+    return Object.values(accessMap).every(item => {
+      if (typeof(item) !== "boolean") {
+        return false;
+      }
+
+      return !item;
+    });
   }
 
   /**

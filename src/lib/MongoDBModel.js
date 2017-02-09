@@ -209,7 +209,8 @@ export default class MongoDBModel extends Model {
     debug('argsToConditions result', query);
 
     if (options.query) {
-      query = Object.assign(query, options.query);
+      // Predefined query should have priority
+      query = Object.assign(options.query, query);
     }
 
     let method = options.method ? options.method : 'find';
