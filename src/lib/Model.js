@@ -5,6 +5,8 @@ const isPlainObject = require('lodash.isplainobject');
 
 const md5 = require('md5');
 
+const sift = require('sift');
+
 import mongoose from 'mongoose';
 
 import Spikenail from './Spikenail';
@@ -460,6 +462,24 @@ export default class Model {
   }
 
   /**
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<*>}
+   */
+  async postHandleReadACL(result, next, options, _, args, ctx) {
+    debug('postHandleReadACL');
+
+    if (options.actionType == 'all') {
+      return await this.postHandleReadAllACL(...arguments);
+    }
+  }
+
+  /**
    * Read all items ACL
    *
    * @param result
@@ -508,6 +528,7 @@ export default class Model {
 
     // Build query from access map
     let query = await this.accessMapToQuery(accessMap, ctx);
+    ctx.queryableAccessMap = this.toQueryableAccessMap(accessMap, ctx);
 
     debug('resulting query %j', query);
 
@@ -541,6 +562,90 @@ export default class Model {
     options.query = Object.assign(options.query || {}, query);
 
     debug('applied query', options.query);
+
+    next();
+  }
+
+  /**
+   * Handle read all ACL after data is fetched
+   * In this method we should filter resulting data according an access map
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   */
+  async postHandleReadAllACL(result, next, options, _, args, ctx) {
+    let accessMap = ctx.queryableAccessMap;
+    // TODO: check that we need it. We might not need it at all
+    debug('postHandleReadAllACL');
+    debug('ACCESSMAP', accessMap);
+    debug('result', result);
+
+    // We have to filter all data according to accessMap
+    // TODO: probably, we should put data formatting in the last middleware
+    // TODO: and not access edges here
+
+    result.result.edges = result.result.edges.map(sdoc => {
+
+      let doc = clone(sdoc);
+
+      debug('postacl - doc iteration', doc);
+
+      // iterate through rules
+      // TODO: move to another method
+
+      // Cache query results
+      let testedQueries = {};
+
+      for (let prop of Object.keys(accessMap)) {
+        let val = accessMap[prop];
+
+        debug('accessMap val %j', val);
+        let allow;
+
+        if (typeof(val) == "boolean") {
+          allow = val;
+        } else {
+          debug('not boolean value');
+          // Apply query on object
+          let queryId = md5(JSON.stringify(val));
+          // Check for cached result
+          if (testedQueries[queryId] !== undefined) {
+            allow = testedQueries[queryId];
+            debug('extract allow from cache', allow);
+          } else {
+            debug('need to apply query %j', val);
+            // Apply query
+            // TODO: probably, we should put data formatting in the last middleware
+            // TODO: and not access node here
+            if (sift(val, [doc.node]).length) {
+              debug('query matched doc');
+              allow = true;
+            } else {
+              debug('query does not match the doc');
+              allow = false;
+            }
+            testedQueries[queryId] = allow;
+          }
+        }
+
+        if (!allow) {
+          // TODO: probably, we should put data formatting in the last middleware
+          // TODO: and not access node here
+          // TODO: should we actually remove property completely with delete
+          // TODO: we currently operate with mongoose objects
+          // TODO: should we ever convert it to plain objects
+          doc.node[prop] = null;
+        }
+      }
+
+      debug('resulting doc', doc);
+
+      return doc;
+    });
 
     next();
   }
@@ -615,6 +720,50 @@ export default class Model {
   }
 
   /**
+   * Replace set of rules in access map with queries
+   * TODO: use this method in accessMapToQuery
+   *
+   * @param sourceAccessMap
+   */
+  toQueryableAccessMap(sourceAccessMap, ctx) {
+
+    debug('toQueryableAccessMap');
+
+    let accessMap = clone(sourceAccessMap);
+
+    let queries = {};
+
+    for (let key of Object.keys(accessMap)) {
+      let ruleSet = accessMap[key];
+
+      debug('iterating rule of accessMap', ruleSet);
+
+      if (typeof(ruleSet) === "boolean") {
+        debug('rule type is boolean - continue');
+        continue;
+      }
+
+      // calculate unique rule set hash
+      let hash = this.toHash(ruleSet);
+      debug('ruleSet hash', hash);
+
+      this.ruleSetToQuery(ruleSet, ctx);
+
+      // we should convert rule set to query only once
+      if (queries[hash]) {
+        accessMap[key] = queries[hash];
+        continue;
+      }
+
+      let queryVal = this.ruleSetToQuery(ruleSet, ctx);
+      accessMap[key] = queryVal;
+      queries[hash] = queryVal;
+    }
+
+    return accessMap;
+  }
+
+  /**
    * To hash
    * @param data
    */
@@ -634,6 +783,7 @@ export default class Model {
     // Lets expand each rule in rule set
     // That mean convert role to condition and merge it with scope
     // Build queries set. Convert each individual rule to query
+    // we assume that there is only dynamic roles left
     let queriesSet = ruleSet.map((rule) => {
 
       let model = this.isDependentRule(rule) ? this.getDependentModel(rule) : this;
@@ -649,8 +799,7 @@ export default class Model {
         debug('scope query', query);
       }
 
-      // TODO: handle * in some other way?
-      if (!rule.roles || rule.roles[0] == '*') {
+      if (!rule.roles) {
         debug('no rule roles or *');
         return {
           allow: rule.allow,
@@ -665,7 +814,7 @@ export default class Model {
         let role = model.schema.roles ? model.schema.roles[roleName] : null;
 
         if (!role) {
-          // TODO: it shouldn't ever happen because we filtered it earlier
+          // This actually could happen because our rule might be dynamic only because of scope
           debug('Role not in possible dynamic roles');
           continue;
         }
@@ -680,6 +829,13 @@ export default class Model {
       }
 
       debug('OR Conditions', conds);
+      if (!conds.length) {
+        debug('finally no conditions built using dynamic roles');
+        return {
+          allow: rule.allow,
+          query: query
+        };
+      }
 
       let result = {};
 
@@ -701,6 +857,9 @@ export default class Model {
 
     // Lets merge all queries set to single query
     let mergedQuery = {};
+
+    // TODO: use bind instead
+    let self = this;
     let toQuery = function(next, arr) {
       let item = arr.pop();
 
@@ -708,7 +867,7 @@ export default class Model {
       let query = item.query;
       if (!item.allow) {
         key = '$and';
-        let query = this.invertMongoQuery(item.query);
+        query = self.invertMongoQuery(item.query);
       }
 
       // If last item
@@ -1364,6 +1523,7 @@ export default class Model {
       this.handleReadACL,
       this.beforeRead,
       this.processRead,
+      this.postHandleReadACL,
       // TODO: afterReadACL handling?
       this.afterRead
     ]
