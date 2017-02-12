@@ -962,7 +962,14 @@ export default class Model {
         // TODO: can we do more? Wrap into $not for example
         throw new Error('Can not invert query. Unsupported operators', sourceQuery);
       } else {
-        // For non objects use $ne to invert value
+        // Invert boolean
+        // If we will use $ne here then empty values could unexpectedly match
+        if (typeof(val) === "boolean") {
+          invertedQuery[key] = !val;
+          continue;
+        }
+
+        // For other values use $ne to invert value
         invertedQuery[key] = { '$ne': val };
       }
     }
