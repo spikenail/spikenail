@@ -579,6 +579,12 @@ export default class Model {
    */
   async postHandleReadAllACL(result, next, options, _, args, ctx) {
     let accessMap = ctx.queryableAccessMap;
+
+    if (!accessMap) {
+      debug('no access map defined for postACL');
+      return next();
+    }
+
     // TODO: check that we need it. We might not need it at all
     debug('postHandleReadAllACL');
     debug('ACCESSMAP', accessMap);
