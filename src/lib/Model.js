@@ -13,6 +13,8 @@ import Spikenail from './Spikenail';
 
 import ValidationService from './services/Validation/ValidationService';
 
+import MongoAccessMap from './AccessMap/MongoAccessMap';
+
 import {
   GraphQLObjectType,
   GraphQLString,
@@ -480,7 +482,16 @@ export default class Model {
   }
 
   /**
-   * Read all items ACL
+   * Returns default ACL rules
+   *
+   * @returns {*}
+   */
+  getACLs() {
+    return this.schema.acls;
+  }
+
+  /**
+   * New realization through accessMap classes
    *
    * @param result
    * @param next
@@ -488,75 +499,65 @@ export default class Model {
    * @param _
    * @param args
    * @param ctx
+   * @returns {Promise.<void>}
+   * @private
    */
   async handleReadAllACL(result, next, options, _, args, ctx) {
+
     debug('handleReadAllACL');
-    let acls = this.schema.acls;
 
-    debug('source acls', acls);
+    // TODO: pass requested (+dependent) fields in options
+    let accessMap = new MongoAccessMap(this, ctx, { action: 'read' });
 
-    // Lets get user roles.
-    //let roles = await this.getStaticRoles(ctx);
-    //debug('staticRoles', roles);
+    // Store access map in the contex
+    ctx.accessMap = accessMap;
 
-    // TODO: first of all apply default values - make it once on models initialization step
-
-    // TODO: Before filtering ACL rules - handle injecting of relation rules
-    let staticRoles = this.getStaticRoles(ctx);
-
-    // Some roles are depends on the object
-    // Modify and filter ACLs according to current request
-    let filteredAcls = acls
-      .filter(this.isRuleMatchAction('read'))
-      .map(this.removeImpossibleRoles.bind(this, ctx))
-      .map(this.markAsDeferred.bind(this, staticRoles))
-      .filter(rule => !!rule.roles.length);
-
-    debug('filtered acls', filteredAcls);
-
-    let accessMap = await this.buildAccessMap(filteredAcls, ctx);
-
-    // Now we have to analyze resulting access map.
-    // TODO: Optimization: first of ALL we have to subtract Requested fields - propbbly before building map
-    // TODO: because we probably don't need to execute deferred actions
-
-    // Check if all access map is false
-    if (this.isAccessMapFails(accessMap)) {
-      debug('access map fails - interrupt execution');
+    if (accessMap.isFails()) {
+      debug('access map fails - interrupt chain');
       return;
     }
 
-    // Build query from access map
-    let query = await this.accessMapToQuery(accessMap, ctx);
-    ctx.queryableAccessMap = this.toQueryableAccessMap(accessMap, ctx);
+    // Check if we need to make a preliminarily request of some data to build final access map
+    if (!accessMap.hasAtLeastOneTrueValue() && accessMap.hasDependentRules()) {
 
-    debug('resulting query %j', query);
+      debug('Need to perform pre-querying data');
+
+      // Get dependent rules compiled in single query
+      let dependentModelQueries = accessMap.getCompiledDependentModelQueries();
+      debug('compiled dependent queries', dependentModelQueries);
+
+      for (let data of dependentModelQueries) {
+        // TODO: we might not want to call mongo query explicitly here
+        // TODO: we need to query only limited set of fields
+        // TODO: e.g. the query is { param: 123 }, then we only need "param" field
+        data.result = await data.model.find(data.query);
+      }
+
+      debug('models with queried data', data);
+
+      // Apply dependent data
+      accessMap.applyDependentData(dependentModelQueries);
+
+      debug('acceessMap with applied data', accessMap);
+    }
+
+    // Compile access map to single query
+
+    // We don't need apply query if no documents can be skipped
+    if (accessMap.hasAtLeastOneTrueValue()) {
+      debug('Not need to apply query - no documents might be skipped');
+      return next();
+    }
+
+    // Try to build query as we possibly need it
+    let query = await accessMap.toQuery();
 
     if (!query) {
-      debug('no query was produced');
+      debug('No query was produced');
       return next();
     }
 
-    // The query should not be applied if there is at least one property with allow: true
-    let shouldApplyQuery = true;
-    for (let allow of Object.values(accessMap)) {
-      if (allow === true) {
-        shouldApplyQuery = false;
-        break;
-      }
-    }
-
-    debug('shouldApplyQuery', shouldApplyQuery);
-
-    if (!shouldApplyQuery) {
-      debug('we should not apply query for now - go next');
-      return next();
-    }
-
-    debug('apply query');
-
-    // TODO 2: Apply query after result is fetched
-    // As conditions could control different set of fields
+    debug('applying query', query);
 
     // Apply query
     options.query = Object.assign(options.query || {}, query);
@@ -578,22 +579,92 @@ export default class Model {
    * @param ctx
    */
   async postHandleReadAllACL(result, next, options, _, args, ctx) {
-    let accessMap = ctx.queryableAccessMap;
+    debug('postHandleReadAllACL', ctx.accessMap);
 
-    if (!accessMap) {
+    debug('result', result);
+
+    // Skip if no access map defined
+    if (!ctx.accessMap) {
       debug('no access map defined for postACL');
       return next();
     }
 
-    // TODO: check that we need it. We might not need it at all
-    debug('postHandleReadAllACL');
-    debug('ACCESSMAP', accessMap);
-    debug('result', result);
+    // Skip for empty result
+    if (!result.result && !result.result.edges && !result.result.edges.length) {
+      debug('no result - skip');
+      return next();
+    }
 
-    // We have to filter all data according to accessMap
+    // Skip for plain access map with no queries
+    // TODO
+
+    // Skip for access map with one query covering all values
+    // TODO
+
+    // Check if we need to prefetch some parent data
+    // If access map have some dependent rules
+    // Check that access map has dependent rules and they were no handled before
+    if (ctx.accessMap.hasDependentRules() && ctx.accessMap.hasAtLeastOneTrueValue()) {
+      debug('accessMap has dependent rules and not able to skip values');
+
+      // lets get needed relations and foreignKeys in order to collect parent ids
+      // iterate dependent rules
+      // build models map
+      // TODO - not implemented
+      let dependentRules = ctx.accessMap.getDependentRules();
+
+      let modelsMap = {};
+      for (let rule of dependentRules) {
+        let model = ctx.accessMap.getDependentModel(rule);
+        let modelName = model.getName();
+
+        // Initialize
+        if (modelsMap[modelName]) {
+          continue;
+        }
+
+        modelsMap[modelName] = {
+          model: model,
+          foreignKey: this.schema.properties[modelName],
+          ids: new Set()
+        }
+      }
+
+      debug('initial modelsMap', modelsMap);
+
+      // Fill ids array of modelsMap
+      for (let edge of result.result.edges) {
+        let doc = edge.node;
+
+        for (let val of Object.values(modelsMap)) {
+          if (doc[val.foreignKey]) {
+            val.ids.add(doc[val.foreignKey]);
+          }
+        }
+      }
+
+      debug('filled models map', modelsMap);
+
+      // Then iterate map perform queries
+      // TODO: we need only limited fields to be fetched
+      // TODO: use Promise.all
+      for (let val of Object.values(modelsMap)) {
+        val.data = await val.model.find({ _id: { '$in': val.ids } })
+      }
+
+      debug('map with queried data', modelsMap);
+
+      debug('apply dependent data');
+      ctx.accessMap.applyDependentData(modelsMap);
+    }
+
+    // Applying queries from accessMap to resulting data
     // TODO: probably, we should put data formatting in the last middleware
     // TODO: and not access edges here
 
+    // TODO: we need some condition to skip this part
+    // TODO: because some acls might be very simple or not exists at all
+    // TODO: at least accessMap.hasRules()
     result.result.edges = result.result.edges.map(sdoc => {
 
       let doc = clone(sdoc);
@@ -606,28 +677,32 @@ export default class Model {
       // Cache query results
       let testedQueries = {};
 
-      for (let prop of Object.keys(accessMap)) {
-        let val = accessMap[prop];
+      for (let prop of Object.keys(ctx.accessMap.accessMap)) {
+        let val = ctx.accessMap.accessMap[prop];
 
         debug('accessMap val %j', val);
         let allow;
 
-        if (typeof(val) == "boolean") {
+        if (typeof(val) ==='boolean') {
           allow = val;
         } else {
           debug('not boolean value');
+          let query = val.query;
+
+          debug('query', val.query);
           // Apply query on object
-          let queryId = md5(JSON.stringify(val));
+          // TODO: we don't need md5
+          let queryId = md5(JSON.stringify(query));
           // Check for cached result
           if (testedQueries[queryId] !== undefined) {
             allow = testedQueries[queryId];
             debug('extract allow from cache', allow);
           } else {
-            debug('need to apply query %j', val);
+            debug('need to apply query %j', query);
             // Apply query
             // TODO: probably, we should put data formatting in the last middleware
             // TODO: and not access node here
-            if (sift(val, [doc.node]).length) {
+            if (sift(query, [doc.node]).length) {
               debug('query matched doc');
               allow = true;
             } else {
@@ -657,628 +732,11 @@ export default class Model {
   }
 
   /**
-   * Check that all elements of access map equals false
-   *
-   * @param accessMap
-   */
-  isAccessMapFails(accessMap) {
-    debug('isAccessMapFails', accessMap);
-    return Object.values(accessMap).every(item => {
-      if (typeof(item) !== "boolean") {
-        return false;
-      }
-
-      return !item;
-    });
-  }
-
-  /**
-   * Access map to query
-   *
-   * @param accessMap
-   * @param ctx
-   * @returns {Promise.<*>}
-   */
-  async accessMapToQuery(accessMap, ctx) {
-    //let staticQuery = this.accessMapToStaticQuery(accessMap);
-
-    debug('accessMapToQuery');
-
-    let queries = {};
-
-    for (let ruleSet of Object.values(accessMap)) {
-
-      debug('iterating rule of accessMap', ruleSet);
-
-      if (typeof(ruleSet) === "boolean") {
-        debug('rule type is boolean - continue');
-        continue;
-      }
-
-      // calculate unique rule set hash
-      let hash = this.toHash(ruleSet);
-      debug('ruleSet hash', hash);
-
-      // we should convert rule set to query only once
-      if (queries[hash]) {
-        debug('rules already converted - skip');
-        continue;
-      }
-
-      queries[hash] = this.ruleSetToQuery(ruleSet, ctx);
-    }
-
-    queries = Object.values(queries);
-
-    debug('Resulting queries array', queries);
-
-    if (!queries.length) {
-      debug('No queries');
-      return null;
-    }
-
-    // TODO: Probably use something like conditionsToOrQuery
-    if (queries.length > 1) {
-      return { '$or': queries };
-    }
-
-    return queries[0];
-  }
-
-  /**
-   * Replace set of rules in access map with queries
-   * TODO: use this method in accessMapToQuery
-   *
-   * @param sourceAccessMap
-   */
-  toQueryableAccessMap(sourceAccessMap, ctx) {
-
-    debug('toQueryableAccessMap');
-
-    let accessMap = clone(sourceAccessMap);
-
-    let queries = {};
-
-    for (let key of Object.keys(accessMap)) {
-      let ruleSet = accessMap[key];
-
-      debug('iterating rule of accessMap', ruleSet);
-
-      if (typeof(ruleSet) === "boolean") {
-        debug('rule type is boolean - continue');
-        continue;
-      }
-
-      // calculate unique rule set hash
-      let hash = this.toHash(ruleSet);
-      debug('ruleSet hash', hash);
-
-      this.ruleSetToQuery(ruleSet, ctx);
-
-      // we should convert rule set to query only once
-      if (queries[hash]) {
-        accessMap[key] = queries[hash];
-        continue;
-      }
-
-      let queryVal = this.ruleSetToQuery(ruleSet, ctx);
-      accessMap[key] = queryVal;
-      queries[hash] = queryVal;
-    }
-
-    return accessMap;
-  }
-
-  /**
    * To hash
    * @param data
    */
   toHash(data) {
     return md5(JSON.stringify(data));
-  }
-
-  /**
-   * Converts ruleSet to query condition
-   *
-   * @param ruleSet
-   * @param ctx
-   */
-  ruleSetToQuery(ruleSet, ctx) {
-    debug('ruleSetToQuery', ruleSet);
-
-    // Lets expand each rule in rule set
-    // That mean convert role to condition and merge it with scope
-    // Build queries set. Convert each individual rule to query
-    // we assume that there is only dynamic roles left
-    let queriesSet = ruleSet.map((rule) => {
-
-      let model = this.isDependentRule(rule) ? this.getDependentModel(rule) : this;
-      debug('building queries set');
-      //debug('model', this);
-
-      let query = {};
-
-      if (rule.scope) {
-        debug('scope exists', rule.scope);
-        // TODO: what arguments?
-        query = rule.scope();
-        debug('scope query', query);
-      }
-
-      if (!rule.roles) {
-        debug('no rule roles or *');
-        return {
-          allow: rule.allow,
-          query: query
-        };
-      }
-
-      let conds = [];
-      // Finding only dynamic roles
-      for (let roleName of rule.roles) {
-        debug('iterating rule role:', roleName);
-        let role = model.schema.roles ? model.schema.roles[roleName] : null;
-
-        if (!role) {
-          // This actually could happen because our rule might be dynamic only because of scope
-          debug('Role not in possible dynamic roles');
-          continue;
-        }
-
-        debug('found dynamic role definition:', role);
-        // Execute handler
-        // TODO: could it be async? On what data it depends? Should we execute it multiple times?
-
-        let cond = Object.assign(role.cond(ctx), query);
-        debug('calculated cond + query', cond);
-        conds.push(cond);
-      }
-
-      debug('OR Conditions', conds);
-      if (!conds.length) {
-        debug('finally no conditions built using dynamic roles');
-        return {
-          allow: rule.allow,
-          query: query
-        };
-      }
-
-      let result = {};
-
-      // check if more than one condition
-      if (conds.length > 1) {
-        result = { '$or': conds }
-      } else {
-        result = conds[0];
-      }
-
-      debug('resulting condition', result);
-
-      return {
-        allow: rule.allow,
-        query: result
-      };
-    });
-    debug('RESULTING QUERIES SET', queriesSet);
-
-    // Lets merge all queries set to single query
-    let mergedQuery = {};
-
-    // TODO: use bind instead
-    let self = this;
-    let toQuery = function(next, arr) {
-      let item = arr.pop();
-
-      let key = '$or';
-      let query = item.query;
-      if (!item.allow) {
-        key = '$and';
-        query = self.invertMongoQuery(item.query);
-      }
-
-      // If last item
-      if (!arr.length) {
-        Object.assign(next, query);
-        return;
-      }
-
-      let newNext = {};
-      next[key] =[newNext, query];
-
-      toQuery(newNext, arr);
-    };
-
-    toQuery(mergedQuery, queriesSet.slice(0));
-
-    debug('mergedQuery', mergedQuery);
-
-    return mergedQuery;
-  }
-
-  /**
-   * Invert mongodb query. Not all queries are supported.
-   * One should avoid specifying a condition with { "allow": false }
-   * as automatic inversion might give unexpected result
-   *
-   * TODO: move to separate npm module
-   * TODO: ( { qty: { $exists: true, $nin: [ 5, 15 ] } } )
-   * TODO: invert $not
-   *
-   * @param sourceQuery
-   */
-  invertMongoQuery(sourceQuery) {
-    let invertedQuery = {};
-
-    for (let key of Object.keys(sourceQuery)) {
-      //debug('iterate key', key);
-      let val = sourceQuery[key];
-
-      if (key.startsWith('$')) {
-        if (key == '$and') {
-          // Invert every item
-          // wrap into $nor
-          invertedQuery['$nor'] = [{
-            '$and': val
-          }];
-        } else if (key == '$or') {
-          // change to $nor
-          invertedQuery['$nor'] = val;
-        } else {
-          throw new Error('Can not invert query. Unsupported top-level operator');
-        }
-
-
-        continue;
-      }
-
-
-      // Operator replace map
-      /*
-        Note that: { $not: { $gt: 1.99 } } is different from the $lte operator
-
-        db.inventory.find( { price: { $not: { $gt: 1.99 } } } )
-        This query will select all documents in the inventory collection where:
-
-        the price field value is less than or equal to 1.99 or
-        the price field does not exist
-
-        This way it is better to avoid $not
-       */
-      let replaceMap = {
-        '$in': '$nin',
-        '$nin': '$in',
-        '$gt': '$lte',
-        '$lte': '$gt',
-        '$lt': '$gte',
-        '$gte': '$lt',
-        '$ne': '$eq'
-      };
-
-      // Check if field value is expression
-      if (isPlainObject(val) && Object.keys(val)[0].startsWith('$')) {
-        let operator = Object.keys(val)[0];
-        // If possible, try to replace operator
-        if (replaceMap[operator]) {
-          invertedQuery[key] = {
-            [replaceMap[operator]]: val[operator]
-          };
-          continue;
-        }
-
-        // TODO: can we do more? Wrap into $not for example
-        throw new Error('Can not invert query. Unsupported operators', sourceQuery);
-      } else {
-        // Invert boolean
-        // If we will use $ne here then empty values could unexpectedly match
-        if (typeof(val) === "boolean") {
-          invertedQuery[key] = !val;
-          continue;
-        }
-
-        // For other values use $ne to invert value
-        invertedQuery[key] = { '$ne': val };
-      }
-    }
-
-    return invertedQuery;
-  }
-
-  /**
-   * Left only rules that matches current static roles or all possible dynamic roles
-   *
-   * @deprecated
-   *
-   * @param ctx
-   * @returns {Function}
-   */
-  isRuleHasPossibleRole(ctx) {
-    return (function(rule) {
-      debug('isRuleHasPossibleRole', rule);
-
-      // TODO: what to do with owner role
-      // TODO: what to do with multiple roels
-      let dynamicRoles = !this.isDependentRule(rule)
-        ? this.getDynamicRoleNames(ctx)
-        : this.getDependentModel(rule).getDynamicRoleNames(ctx);
-
-      debug('dynamic roles', dynamicRoles);
-      let roles = dynamicRoles.concat(this.getStaticRoles(ctx));
-
-      debug('possible roles', roles);
-
-      // TODO we have to trim impossible roles
-      // and if roles become empty - we are deleting this Rule completely
-      //
-      if (!~rule.roles.indexOf('*') && !rule.roles.filter(r => ~roles.indexOf(r)).length) {
-        debug('false');
-        return false;
-      }
-
-      debug('true');
-
-      return true;
-    }).bind(this);
-  }
-
-  /**
-   * Remove impossible roles
-   *
-   * @param ctx
-   * @param sourceRule
-   */
-  removeImpossibleRoles(ctx, sourceRule) {
-    debug('remove impossible roles, sourceRule:', sourceRule);
-
-    let rule = clone(sourceRule);
-
-    // 1. Get possible roles:
-    // all possible (defined) dynamic roles + static roles of current user
-
-    // Get dynamic roles for model from current model or related
-    let dynamicRoles = this.isDependentRule(rule)
-      ? this.getDependentModel(rule).getDynamicRoleNames(ctx)
-      : this.getDynamicRoleNames(ctx);
-    debug('dynamicRoles', dynamicRoles);
-
-    // Get static roles that based on currentUser stored in context
-    let staticRoles = this.getStaticRoles(ctx);
-    debug('staticRoles', staticRoles);
-
-    // If rule * exists - left only it
-    if (~rule.roles.indexOf('*')) {
-      rule.roles = ['*'];
-      debug('Match * role, result', rule);
-      return rule;
-    }
-
-    // Try to match static roles
-    let matchedStaticRoles = this.getMatchedRoles(rule, staticRoles);
-    if (matchedStaticRoles.length) {
-      // If static roles matched - left only one matched static role
-      // This way we just trim redundant roles
-      rule.roles = [matchedStaticRoles[0]];
-
-      debug('Match static roles, result', rule);
-
-      return rule;
-    }
-
-    // no static roles are matched
-    // theoretically only dynamic roles left
-    let matchedDynamicRoles = this.getMatchedRoles(rule, dynamicRoles);
-    if (matchedDynamicRoles.length) {
-      // left only dynamic roles
-      // TODO: this is probably redundant
-      // TODO: A invalid roles should be filtered on initialization step
-      rule.roles = matchedDynamicRoles;
-      debug('Match dynamic roles, result', rule);
-      return rule;
-    }
-
-    rule.roles = [];
-
-    debug('Not match any role, result', rule);
-
-    return rule;
-  }
-
-
-  /**
-   * Set deferred property of the rule
-   * Deferred indicates if rule could be applied immediately or
-   * requires to get some additional data
-   *
-   * @param staticRoles
-   * @param sourceRule
-   */
-  markAsDeferred(staticRoles, sourceRule) {
-
-    // Rule might be deferred or static
-    // Rule is deferred if it has scope or it has dynamic role
-    // Otherwise rule is static
-
-    // The method assumes that all rules are filtered from redundant or incorrect values
-    // If rule has scope or not match static rule or *
-
-    debug('mark as deferred', sourceRule);
-    let rule = clone(sourceRule);
-
-    if (rule.scope || (!~rule.roles.indexOf('*') && !this.isRuleMatchRoles(rule, staticRoles))) {
-      debug('rule is deferred');
-      rule.deferred = true;
-    } else {
-      debug('rule is static');
-      rule.deferred = false;
-    }
-
-    return rule;
-  }
-
-  /**
-   * Check if rule match any of given roles
-   *
-   * @param rule
-   * @param roles
-   * @returns {boolean}
-   */
-  isRuleMatchRoles(rule, roles) {
-    return !!rule.roles.filter(r => ~roles.indexOf(r)).length;
-  }
-
-
-  /**
-   * Match rule with "roles" and return array of matched rule roles
-   *
-   * @param rule
-   * @param roles
-   * @returns {Array.<T>}
-   */
-  getMatchedRoles(rule, roles) {
-    return rule.roles.filter(r => ~roles.indexOf(r));
-  }
-
-  /**
-   * Applies ACL rules on properties
-   * Might be deferred
-   * TODO: cond function could return static value - e.g. false, or true.
-   * TODO: if, for example, user is anonymous
-   * TODO: think later how it should be implemented
-   *
-   * @returns {Promise.<void>}
-   */
-  async buildAccessMap(acls, ctx) {
-    // getDeferredMap
-    // think later what name of the function and args are better
-    debug('Applying rules on props');
-
-    // Initialize the access map of properties
-    // By default, everything is allowed
-    let accessMap = {};
-    // TODO: think - should we include relation properties
-    // TODO: default behaviour - no restrictions
-    Object.keys(this.schema.properties).forEach(field => {
-      accessMap[field] = true;
-    });
-
-    debug('Iterating filtered acls');
-
-    // New algorithm
-    let staticRoles = this.getStaticRoles(ctx);
-    //let dynamicRoles = this.getDynamicRoles(ctx);
-    for (let [index, rule] of acls.entries()) {
-      debug('iterating rule', index, rule);
-
-      let applyValue = rule.allow;
-
-      // deferred - helper property that set earlier
-      if (rule.deferred === true) {
-        applyValue = clone(rule);
-        // Set temporary id in order to simplify further calculations
-        applyValue.id = index;
-      }
-
-      debug('applyValue:', applyValue);
-
-      // TODO: quick fix. move it to initialization step
-      if (!rule.properties)  {
-        rule.properties = ['*'];
-      }
-
-      for (let prop of rule.properties) {
-        debug('iterating rule properties');
-        if (prop == '*') {
-          for (let prop of Object.keys(accessMap)) {
-            accessMap[prop] = this.getNewApplyValue(accessMap[prop], applyValue);
-          }
-          break;
-        }
-
-        // We have to check current value
-        accessMap[prop] = this.getNewApplyValue(accessMap[prop], applyValue)
-      }
-
-    }
-
-    debug('resulting accessMap', accessMap);
-
-    return accessMap;
-  }
-
-  /**
-   * Get new apply value
-   *
-   * @param prevValue
-   * @param applyValue
-   */
-  getNewApplyValue(prevValue, applyValue) {
-    debug('getNewApplyValue', prevValue, applyValue);
-    // Algorithm that applies value on access map property
-
-    // If strict value just apply as is
-    if (typeof(applyValue) === "boolean") {
-      debug('strict boolean');
-      return applyValue;
-    }
-
-    // If value with conditions lets check previous value
-    // If previous value is also condition then append this condition
-    if (Array.isArray(prevValue)) {
-      debug('append');
-      prevValue.push(applyValue);
-      return prevValue;
-    }
-
-    // If previous value is boolean
-    // Replace it with apply value only if it invert allow value
-    if (prevValue !== applyValue.allow) {
-      debug('prevValue is different from deferred value - set deferred');
-      return [applyValue];
-    }
-
-    // Otherwise return prev value
-    debug('deferred value does not override prev value - keep prev value');
-    return prevValue;
-  }
-
-  /**
-   * Filters ACL rules by action
-   *
-   * @param action
-   * @returns {Function}
-   */
-  isRuleMatchAction(action) {
-    return function(rule) {
-      debug('isRuleMatchAction', action, rule);
-      if (!~rule.actions.indexOf('*') && !~rule.actions.indexOf(action)) {
-        debug('false');
-        return false;
-      }
-
-      debug('true');
-      return true;
-    }
-  }
-
-
-  /**
-   * Check if rule depends on another model
-   *
-   * @param rule
-   * @returns {boolean}
-   */
-  isDependentRule(rule) {
-    debug('isDependentRule');
-    return !!rule.checkRelation;
-  }
-
-  /**
-   * Get model that rule depends on
-   * @param rule
-   * @returns {*}
-   */
-  getDependentModel(rule) {
-    debug('getDependentModel');
-    return Spikenail.models[rule.checkRelation];
   }
 
   /**
@@ -1298,7 +756,6 @@ export default class Model {
 
     return ['user'];
   }
-
 
   /**
    * Get dynamic roles
