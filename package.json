@@ -59,7 +59,7 @@
     "pluralize": "^3.0.0",
     "relay-mongoose-connection": "github:shenyzore/relay-mongoose-connection",
     "require-all": "^2.0.0",
-    "sift": "^3.2.6",
+    "sift": "git+https://github.com/igorlesnenko/sift.js.git",
     "validator": "^6.0.0"
   },
   "devDependencies": {

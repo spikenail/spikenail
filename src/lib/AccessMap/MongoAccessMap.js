@@ -1,4 +1,5 @@
 const debug = require('debug')('spikenail:MongoAccessMap');
+const hl = require('debug')('hl');
 
 const clone = require('lodash.clone');
 const isPlainObject = require('lodash.isplainobject');
@@ -73,7 +74,7 @@ export default class MongoAccessMap {
    * TODO: if, for example, user is anonymous
    * TODO: think later how it should be implemented
    *
-   * @param acls
+   * @param acls raw schema acl rules defined by user
    */
   buildAccessMap(acls) {
 
@@ -117,13 +118,14 @@ export default class MongoAccessMap {
         debug('iterating rule properties');
         if (prop === '*') {
           for (let prop of Object.keys(accessMap)) {
-            accessMap[prop] = this.getNewApplyValue(accessMap[prop], applyValue);
+            // TODO: no time to think why we need all these clone statements
+            accessMap[prop] = clone(this.getNewApplyValue(clone(accessMap[prop]), clone(applyValue)));
           }
           break;
         }
 
         // We have to check current value
-        accessMap[prop] = this.getNewApplyValue(accessMap[prop], applyValue)
+        accessMap[prop] = clone(this.getNewApplyValue(clone(accessMap[prop]), clone(applyValue)));
       }
     }
 
@@ -168,6 +170,7 @@ export default class MongoAccessMap {
 
     // If prev value is object with rule set, just push additional rule
     debug('append');
+
     prevValue.rules.push(applyValue);
 
     return prevValue;
@@ -210,7 +213,7 @@ export default class MongoAccessMap {
       // queries[hash] = queryVal;
     }
 
-    debug('map with builtRuleQueries', this.accessMap);
+    debug('map with builtRuleQueries %j', this.accessMap);
 
     this.built.ruleQueries = true;
   }
@@ -308,11 +311,21 @@ export default class MongoAccessMap {
   buildRuleSetQueries() {
     debug('buildRuleSetQueries', this.accessMap);
 
+    hl('buildRuleSetQueries');
+
     // anyway need to iterate all values
     for (let key of Object.keys(this.accessMap)) {
       // Lets merge all queries set to single query
       let value = this.accessMap[key];
       debug('iterate map value', value);
+
+
+      // TODO not sure
+      if (typeof(value) === "boolean") {
+        debug('rule type is boolean - continue');
+        continue;
+      }
+
       let mergedQuery = {};
 
       // TODO: use bind instead
@@ -354,7 +367,7 @@ export default class MongoAccessMap {
   /**
    * Convert the whole access map to single query if possible
    */
-  async toQuery() {
+  async getQuery() {
     // TODO: cache the result?
 
     debug('toQuery');
@@ -555,19 +568,19 @@ export default class MongoAccessMap {
   hasDependentRules() {
     debug('hasDependentRules', this.accessMap);
 
-    //if (!built.createAccessMap)
-
-    Object.values(this.accessMap).every(val => {
-      if(typeof(val) === 'boolean') {
-        return true;
+    for (let val of Object.values(this.accessMap)) {
+      if (typeof(val) === 'boolean') {
+        continue;
       }
 
       for (let rule of val.rules) {
         if (this.isDependentRule(rule)) {
-          return false;
+          return true;
         }
       }
-    })
+    }
+
+    return false;
   }
 
 
@@ -598,11 +611,18 @@ export default class MongoAccessMap {
    */
   getCompiledDependentModelQueries() {
 
+    debug('getCompiledDependentModelQueries');
+
     // depends on buildRuleQueries
     // Requires individual rule queries to be built first
     if (!this.built.ruleQueries) {
+
+      debug('handle relation - ruleQueries');
+
       this.buildRuleQueries();
     }
+
+    debug('iterating accessmap');
 
     let models = {};
 
@@ -626,8 +646,7 @@ export default class MongoAccessMap {
             model: model
           };
         }
-
-        queries[model.getName()].push(rule.query);
+        models[model.getName()].queries.push(rule.query);
       })
     }
 
@@ -642,12 +661,55 @@ export default class MongoAccessMap {
   /**
    * Convert rule to strict rule. Trims scopes, roles
    *
+   * @deprecated
+   *
    * @param rule
    */
   ruleToStrict(rule) {
     // TODO should we clone and return new rule
     delete rule.scope;
     rule.roles = ['*']; // Do we actually need it?
+  }
+
+  /**
+   * Returns only dependent rules
+   *
+   * TODO: no very optimal approach
+   */
+  getDependentRules() {
+    debug('get dependent rules');
+    let result = [];
+
+    let ids = new Set();
+
+    for (let prop of Object.keys(this.accessMap)) {
+
+      let val = this.accessMap[prop];
+
+      debug('iterate value of accessmap', val);
+
+      if (typeof(val) === 'boolean') {
+        continue;
+      }
+
+      let dependentRules = val.rules.filter(this.isDependentRule);
+      if (!dependentRules.length) {
+        debug('no dependent rules');
+        continue;
+      }
+
+      dependentRules.forEach(rule => {
+        let ruleId = JSON.stringify(rule);
+        if (!ids.has(ruleId)) {
+          result.push(rule);
+          ids.add(ruleId);
+        }
+      });
+    }
+
+    debug('unique dependent rules result', result);
+    return result;
+
   }
 
   /**
@@ -659,6 +721,9 @@ export default class MongoAccessMap {
   applyDependentData(data) {
 
     debug('apply dependent data', data);
+    hl('apply dep data');
+
+    debug('accessmap current state %j', this.accessMap);
 
     // TODO: Dependent on buildRulesQueries
     // It should be launched before
@@ -669,10 +734,10 @@ export default class MongoAccessMap {
 
     // Now we need to filter data using sift
     for (let prop of Object.keys(this.accessMap)) {
-
+      // TODO we are replacing same val nultiple times
       let val = this.accessMap[prop];
 
-      debug('iterate value of accessmap', val);
+      debug('iterate value of accessmap %j', val);
 
       if (typeof(val) === "boolean") {
         continue;
@@ -685,11 +750,15 @@ export default class MongoAccessMap {
       }
 
       dependentRules.forEach(rule => {
+
         debug('iterate dep rules', rule);
 
         let model = this.getDependentModel(rule);
         let modelName = model.getName();
 
+        debug('applying sift', rule.query, data[modelName].data);
+
+        // TODO optimize - no need to reapply same query to the same data
         let queryResult = sift(rule.query, data[modelName].data);
 
         debug('Query result', queryResult);
@@ -705,11 +774,20 @@ export default class MongoAccessMap {
         } else {
           debug('building new query cond');
 
+          debug('rule.checkRelation', rule.checkRelation);
+          debug('model.schema', this.model.schema);
+
           // Get relation to check in order to extract foreignKey name
-          let foreignKey = model.schema.properties[rule.checkRelation].foreignKey;
+
+          let relation = this.model.schema.properties[rule.checkRelation];
+          let foreignKey = relation.foreignKey;
+          let property = this.model.schema.properties[foreignKey];
           debug('foreignKey', foreignKey);
 
-          let newQuery = {[foreignKey]: {'$in': queryResult.map(doc => doc.id)}};
+          // should we fix the library
+          let newQuery = {[foreignKey]: {'$in': queryResult.map(doc =>
+            doc._id
+          )}};
 
           debug('New query', newQuery);
 
@@ -718,7 +796,7 @@ export default class MongoAccessMap {
           rule.query = newQuery;
         }
 
-        debug('UPDATED rule', rule);
+        debug('UPDATED rule %j', rule);
       });
 
       // Recalculate the whole value if needed
@@ -763,7 +841,7 @@ export default class MongoAccessMap {
    */
   queriesToOrQuery(queries) {
     // check if more than one condition
-    if (conds.length > 1) {
+    if (queries.length > 1) {
       return { '$or': queries }
     }
 

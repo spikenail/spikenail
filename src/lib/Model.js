@@ -1,4 +1,5 @@
 const debug = require('debug')('spikenail:Model');
+const hl = require('debug')('hl');
 
 const clone = require('lodash.clone');
 const isPlainObject = require('lodash.isplainobject');
@@ -526,14 +527,15 @@ export default class Model {
       let dependentModelQueries = accessMap.getCompiledDependentModelQueries();
       debug('compiled dependent queries', dependentModelQueries);
 
-      for (let data of dependentModelQueries) {
+      // TODO: use Promise.all
+      for (let data of Object.values(dependentModelQueries)) {
         // TODO: we might not want to call mongo query explicitly here
         // TODO: we need to query only limited set of fields
         // TODO: e.g. the query is { param: 123 }, then we only need "param" field
-        data.result = await data.model.find(data.query);
+        data.data = await data.model.model.find(data.query);
       }
 
-      debug('models with queried data', data);
+      debug('models with queried data', dependentModelQueries);
 
       // Apply dependent data
       accessMap.applyDependentData(dependentModelQueries);
@@ -549,8 +551,10 @@ export default class Model {
       return next();
     }
 
+    debug('need to apply query');
+
     // Try to build query as we possibly need it
-    let query = await accessMap.toQuery();
+    let query = await accessMap.getQuery();
 
     if (!query) {
       debug('No query was produced');
@@ -604,13 +608,15 @@ export default class Model {
     // Check if we need to prefetch some parent data
     // If access map have some dependent rules
     // Check that access map has dependent rules and they were no handled before
-    if (ctx.accessMap.hasDependentRules() && ctx.accessMap.hasAtLeastOneTrueValue()) {
+
+    // FIXME: remove temporary hack below
+    // TODO Access map changed so thus check will return incorrect result for our case
+    if (ctx.accessMap.hasDependentRules() && ctx.accessMap.hasAtLeastOneTrueValue() && false /* TODO - temp test */) {
       debug('accessMap has dependent rules and not able to skip values');
 
       // lets get needed relations and foreignKeys in order to collect parent ids
       // iterate dependent rules
       // build models map
-      // TODO - not implemented
       let dependentRules = ctx.accessMap.getDependentRules();
 
       let modelsMap = {};
@@ -649,7 +655,7 @@ export default class Model {
       // TODO: we need only limited fields to be fetched
       // TODO: use Promise.all
       for (let val of Object.values(modelsMap)) {
-        val.data = await val.model.find({ _id: { '$in': val.ids } })
+        val.data = await val.model.model.find({ _id: { '$in': val.ids } })
       }
 
       debug('map with queried data', modelsMap);
@@ -665,11 +671,13 @@ export default class Model {
     // TODO: we need some condition to skip this part
     // TODO: because some acls might be very simple or not exists at all
     // TODO: at least accessMap.hasRules()
+
+    // TODO: should no run if not needed - only one set of rules applied to all fields
     result.result.edges = result.result.edges.map(sdoc => {
 
       let doc = clone(sdoc);
 
-      debug('postacl - doc iteration', doc);
+      hl('postacl - doc iteration', doc);
 
       // iterate through rules
       // TODO: move to another method
@@ -689,7 +697,7 @@ export default class Model {
           debug('not boolean value');
           let query = val.query;
 
-          debug('query', val.query);
+          hl('query', val.query);
           // Apply query on object
           // TODO: we don't need md5
           let queryId = md5(JSON.stringify(query));
@@ -699,14 +707,17 @@ export default class Model {
             debug('extract allow from cache', allow);
           } else {
             debug('need to apply query %j', query);
+            debug('to data', [doc.node]);
             // Apply query
             // TODO: probably, we should put data formatting in the last middleware
             // TODO: and not access node here
-            if (sift(query, [doc.node]).length) {
-              debug('query matched doc');
+            let queryResult = sift(query, [doc.node]);
+
+            if (queryResult.length) {
+              hl('query matched doc');
               allow = true;
             } else {
-              debug('query does not match the doc');
+              hl('query does not match the doc');
               allow = false;
             }
             testedQueries[queryId] = allow;
@@ -714,6 +725,13 @@ export default class Model {
         }
 
         if (!allow) {
+
+          // FIXME: quick workaround
+          if (prop == 'id') {
+            doc.node['_id'] = null;
+            continue;
+          }
+
           // TODO: probably, we should put data formatting in the last middleware
           // TODO: and not access node here
           // TODO: should we actually remove property completely with delete
@@ -721,6 +739,8 @@ export default class Model {
           // TODO: should we ever convert it to plain objects
           doc.node[prop] = null;
         }
+
+        debug('doc iteration result', doc);
       }
 
       debug('resulting doc', doc);
