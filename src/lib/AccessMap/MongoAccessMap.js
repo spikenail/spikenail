@@ -53,6 +53,14 @@ export default class MongoAccessMap {
     // TODO: should we ever run something here
     // Build map without queries
     this.accessMap = this.buildAccessMap(this.acls);
+
+    // Save some initial properties
+    // TODO: not sure how to implement it better, so let's use quick fix for now
+    // TODO: the issue is that we might apply some data and change actual rules
+    // TODO: but we still need some metrics based on initial data to make some decisions
+    this.initialProps = {};
+    this.initialProps.hasDependentRules = this.hasDependentRules();
+    this.initialProps.hasAtLeastOneTrueValue = this.hasAtLeastOneTrueValue()
   }
 
   /**

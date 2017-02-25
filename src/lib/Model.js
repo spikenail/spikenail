@@ -609,9 +609,8 @@ export default class Model {
     // If access map have some dependent rules
     // Check that access map has dependent rules and they were no handled before
 
-    // FIXME: remove temporary hack below
-    // TODO Access map changed so thus check will return incorrect result for our case
-    if (ctx.accessMap.hasDependentRules() && ctx.accessMap.hasAtLeastOneTrueValue() && false /* TODO - temp test */) {
+    // Access map might be changed to this step, but we need to check initial configuration
+    if (ctx.accessMap.initialProps.hasDependentRules && ctx.accessMap.initialProps.hasAtLeastOneTrueValue) {
       debug('accessMap has dependent rules and not able to skip values');
 
       // lets get needed relations and foreignKeys in order to collect parent ids
