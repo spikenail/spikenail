@@ -488,7 +488,7 @@ export default class Model {
    * @returns {*}
    */
   getACLs() {
-    return this.schema.acls;
+    return this.schema.acls || [];
   }
 
   /**
@@ -509,8 +509,9 @@ export default class Model {
 
     // TODO: pass requested (+dependent) fields in options
     let accessMap = new MongoAccessMap(this, ctx, { action: 'read' });
+    await accessMap.init();
 
-    // Store access map in the contex
+    // Store access map in the context
     ctx.accessMap = accessMap;
 
     if (accessMap.isFails()) {
