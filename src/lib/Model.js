@@ -450,7 +450,7 @@ export default class Model {
     }
 
     if (options.actionType == 'hasMany') {
-
+      return await this.handleHasManyACL(...arguments);
     }
 
     if (options.actionType == 'one') {
@@ -480,6 +480,11 @@ export default class Model {
     if (options.actionType == 'all') {
       return await this.postHandleReadAllACL(...arguments);
     }
+
+    if (options.actionType == 'hasMany') {
+      // TODO: same function?
+      return await this.postHandleReadAllACL(...arguments);
+    }
   }
 
   /**
@@ -489,6 +494,100 @@ export default class Model {
    */
   getACLs() {
     return this.schema.acls || [];
+  }
+
+  /**
+   * Handle hasMany ACL
+   * TODO: it is almost full copy from handleReadALLACL for now. Need to do refactoring
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async handleHasManyACL(result, next, options, _, args, ctx) {
+    debug('handle has many ACL');
+    debug('_', _);
+
+    let accessMap = new MongoAccessMap(this, ctx, { action: 'read' });
+    await accessMap.init();
+
+    // Store access map in the context
+    // TODO: here we are probably overriding previous accessMap of parent items.
+    // TODO: any potential issue? It is still the same context I guess
+    ctx.accessMap = accessMap;
+
+    if (accessMap.isFails()) {
+      debug('access map fails - interrupt chain');
+      return;
+    }
+
+    // Check if we need to make a preliminarily request of some data to build final access map
+    if (!accessMap.hasAtLeastOneTrueValue() && accessMap.hasDependentRules()) {
+      // TODO: one possible issue is that parent object might not have enough fields requested
+      // TODO: in order to do later acl check. We need request additional fields.
+      // TODO: or better - determine if hasMany items requested and what fields needed for acl check and add them
+      // TODO: currently we are requesting the whole document anyway
+      // TODO: additionally we can optimize acl rules that only have "test: parent" rule
+      // TODO: in that case no need to check anything
+      hl('Need to perform pre-querying data');
+
+      // Get dependent rules compiled in single query
+      let dependentModelQueries = accessMap.getCompiledDependentModelQueries();
+      debug('compiled dependent queries', dependentModelQueries);
+
+      // TODO: use Promise.all
+      for (let data of Object.values(dependentModelQueries)) {
+        // if data already exists no need to query
+        // check if _ instance of model model model
+        hl('prefetch data iteration');
+
+        if (_ instanceof data.model.model) {
+          hl('_ instance of model! no need to fetch');
+          data.data = [_];
+          continue;
+        }
+
+        data.data = await data.model.model.find(data.query);
+      }
+
+      debug('models with queried data', dependentModelQueries);
+
+      // Apply dependent data
+      accessMap.applyDependentData(dependentModelQueries);
+
+      debug('acceessMap with applied data', accessMap);
+    }
+
+    // Compile access map to single query
+
+    // We don't need apply query if no documents can be skipped
+    if (accessMap.hasAtLeastOneTrueValue()) {
+      debug('Not need to apply query - no documents might be skipped');
+      return next();
+    }
+
+    debug('need to apply query');
+
+    // Try to build query as we possibly need it
+    let query = await accessMap.getQuery();
+
+    if (!query) {
+      debug('No query was produced');
+      return next();
+    }
+
+    debug('applying query', query);
+
+    // Apply query
+    options.query = Object.assign(options.query || {}, query);
+
+    debug('applied query', options.query);
+
+    next();
   }
 
   /**
