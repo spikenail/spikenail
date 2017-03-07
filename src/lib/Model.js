@@ -1869,6 +1869,10 @@ export default class Model {
 
     // _ is now an array...
 
+    if (!Array.isArray(_)) {
+      _ = [_];
+    }
+
     let ids = _.map(item => item._id);
 
     debug('resolveHasMany ids', ids);
@@ -1920,16 +1924,34 @@ export default class Model {
     return paramsCollection.map((params) => {
 
       let id = params.arguments[0].id;
+      // https://facebook.github.io/relay/graphql/connections.htm
 
       let result = edges.filter(e => {
+        // TODO: we need to recalculate edge cursor as it's value make no sense in current case
+        // TODO: but first - we need to refactor current pagination approach - not sure what cursors should be in hasMany case
         return e.node[fk].toString() === id.toString()
       });
 
-      // FIXME: we have to spoof pageInfo and cursor - otherwise error will be thrown
       return {
-        edges: result
+        edges: result,
+        pageInfo: {
+          hasNextPage: false,
+          hasPreviousPage: false
+          // TODO startCursor, endCursor
+        }
       };
     });
+  }
+
+  /**
+   * BelongsTo batching function for dataloader in order to avoid N+1 issue
+   *
+   * @param paramsCollection
+   * @returns {Promise.<void>}
+   */
+  async batchBelongsTo(paramsCollection) {
+    hl('batchBelongsTo');
+    // TODO
   }
 
   /**

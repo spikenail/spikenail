@@ -21,6 +21,9 @@ export default function(options) {
 
       // Batch hasManyResolvers
       dataLoaders[name + 'HasManyLoader'] = new DataLoader(model.batchLoadHasMany.bind(model), { cache: false });
+
+      // Batch belongsTo
+      dataLoaders[name + 'BelongsToLoader'] = new DataLoader(model.batchBelongsTo.bind(model), { cache: false });
     }
     console.log('dataLoaders', dataLoaders);
 

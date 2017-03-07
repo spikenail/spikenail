@@ -584,13 +584,22 @@ class Spikenail extends EventEmitter {
                 arguments: [...arguments]
               };
 
-              return await ctx.dataLoaders[this.models[field.ref].getName() + 'HasManyLoader'].load(params);
-
               // TODO: we should not use batching if any of pagination params passed
 
-              // return this.models[field.ref].resolveHasMany({
-              //   property: field
-              // }, ...arguments);
+              // check if pagination params passed
+              // TODO: hasPaginationArgs
+              if (args.first || args.after) {
+
+                xhl('pagination params found', args);
+
+                return this.models[field.ref].resolveHasMany({
+                  property: field
+                }, ...arguments);
+              }
+
+              return await ctx.dataLoaders[this.models[field.ref].getName() + 'HasManyLoader'].load(params);
+
+
 
             }).bind(this)
           };
