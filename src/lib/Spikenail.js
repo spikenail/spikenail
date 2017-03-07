@@ -1,5 +1,7 @@
 const debug = require('debug')('spikenail:Spikenail');
 
+const xhl = require('debug')('xhl');
+
 import Koa from 'koa';
 import convert from 'koa-convert';
 import graphqlHTTP from 'koa-graphql';
@@ -290,7 +292,7 @@ class Spikenail extends EventEmitter {
             params.id = fromGlobalId(args.id).id;
           }
 
-          return model.resolveItem(params, ...arguments);
+          return model.resolveOne(params, ...arguments);
         }).bind(this)
       };
     }
@@ -571,10 +573,25 @@ class Spikenail extends EventEmitter {
               }
             }),
             args: this.models[field.ref].getGraphqlListArgs(),
-            resolve: (function(_, args) {
-              return this.models[field.ref].resolveHasMany({
-                property: field
-              }, ...arguments);
+            resolve: (async function(_, args, ctx) {
+
+              xhl('resolver - resolve hasMany');
+
+              let params = {
+                options: {
+                  property: field
+                },
+                arguments: [...arguments]
+              };
+
+              return await ctx.dataLoaders[this.models[field.ref].getName() + 'HasManyLoader'].load(params);
+
+              // TODO: we should not use batching if any of pagination params passed
+
+              // return this.models[field.ref].resolveHasMany({
+              //   property: field
+              // }, ...arguments);
+
             }).bind(this)
           };
         }

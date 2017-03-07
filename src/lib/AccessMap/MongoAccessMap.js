@@ -62,7 +62,7 @@ export default class MongoAccessMap {
         continue;
       }
 
-      debug('Injection model found');
+      hl('Injection model found:', model.getName());
 
       // Create access map for the
       let injectAccessMap = new MongoAccessMap(model, this.ctx, this.options);
@@ -71,7 +71,7 @@ export default class MongoAccessMap {
       // TODO: we have to throw an error if it has dependent rules as we are likely to unable handle this case for now
       // TODO: not sure about nested injection
       if (injectAccessMap.hasAtLeastOneTrueValue()) {
-        debug('inject map has true value');
+        hl('inject map has true value');
         // allow all
         replaceMap[index] = [{
           allow: true,
@@ -80,7 +80,7 @@ export default class MongoAccessMap {
           actions: [this.options.action]
         }]
       } else if (injectAccessMap.isFails()) {
-        debug('inject map fails');
+        hl('inject map fails');
         // build query
         replaceMap[index] = [{
           allow: false,
@@ -89,12 +89,13 @@ export default class MongoAccessMap {
           actions: [this.options.action]
         }]
       } else {
+        hl('accessmap is not determined');
         // Unable to instantly determine an access based on static roles
         // build query and use it as scope
 
         // An issue - constructor is not async stuff
         let query = await injectAccessMap.getQuery();
-        debug('inject query is', query);
+        hl('inject query is %j', query);
         // TODO: we could possibly pick up the query of _id/or lists field only
         // TODO: means simplest query that will give us allow true value
 
@@ -110,7 +111,8 @@ export default class MongoAccessMap {
           allow: true,
           fields: ['*'],
           roles: ['*'],
-          scope: () => { return query },
+          //test: 123,
+          scope: function () { return query },
           actions: [this.options.action],
           checkRelation: model.getName()
         }]
@@ -130,7 +132,7 @@ export default class MongoAccessMap {
       debug('after splice');
     }
 
-    debug('acls after injection', this.sourceACLs);
+    hl('acls after injection %j', this.sourceACLs, this.sourceACLs);
 
     // Filter model acls according to specified options
     // TODO: remove ctx from arguments - it is possible to access it by this.ctx
@@ -920,7 +922,7 @@ export default class MongoAccessMap {
 
     // Now we need to filter data using sift
     for (let prop of Object.keys(this.accessMap)) {
-      // TODO we are replacing same val nultiple times
+      // TODO we are replacing same val multiple times
       let val = this.accessMap[prop];
 
       debug('iterate value of accessmap %j', val);
@@ -942,12 +944,12 @@ export default class MongoAccessMap {
         let model = this.getDependentModel(rule);
         let modelName = model.getName();
 
-        debug('applying sift', rule.query, data[modelName].data);
+        hl('applying sift', rule.query, data[modelName].data);
 
         // TODO optimize - no need to reapply same query to the same data
         let queryResult = sift(rule.query, data[modelName].data);
 
-        debug('Query result', queryResult);
+        hl('Query result', queryResult);
 
         if (!queryResult.length) {
           debug('already fails = need to recalculate accessMap property');
@@ -1001,9 +1003,9 @@ export default class MongoAccessMap {
       };
 
       for (let [index, rule] of rules.entries()) {
-        debug('iterating recalc rule', index, rule);
+        hl('iterating recalc rule', index, rule);
 
-        let applyValue = rule.allow;
+        let applyValue = !rule.allow; // TODO: will it actually work?
 
         if (!rule.recalc) {
           applyValue = clone(rule);

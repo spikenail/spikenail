@@ -451,6 +451,7 @@ export default class MongoDBModel extends Model {
    * TODO: probably, make no sense
    */
   async resolve(params, _, args, ctx) {
+    debug('resolve');
     // If single item resolve
     if (params.type == 'single') {
       return this.resolveItem(params, _, args, ctx);
@@ -463,18 +464,5 @@ export default class MongoDBModel extends Model {
     if (params.type == 'relation') {
       return this.resolveRelation(params, _, args, ctx)
     }
-  }
-
-  /**
-   * Alias for single item resolve
-   *
-   * @param params
-   * @param _
-   * @param args
-   * @param ctx
-   * @returns {{}}
-   */
-  async resolveOne(params, _, args, ctx) {
-    return this.resolveItem(params, _, args, ctx);
   }
 }

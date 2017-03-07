@@ -454,12 +454,13 @@ export default class Model {
     }
 
     if (options.actionType == 'one') {
-
+      return await this.handleReadOneACL(...arguments);
     }
 
     if (options.actionType == 'belongsTo') {
 
     }
+
 
     next();
   }
@@ -485,6 +486,11 @@ export default class Model {
       // TODO: same function?
       return await this.postHandleReadAllACL(...arguments);
     }
+
+    if (options.actionType == 'one') {
+      return await this.postHandleReadOneACL(...arguments);
+    }
+
   }
 
   /**
@@ -494,6 +500,71 @@ export default class Model {
    */
   getACLs() {
     return this.schema.acls || [];
+  }
+
+  /**
+   * TODO: almost copypaste for now
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async handleReadOneACL(result, next, options, _, args, ctx) {
+    debug('handleOneACL');
+
+    let accessMap = new MongoAccessMap(this, ctx, { action: 'read' });
+    await accessMap.init();
+
+    // Store access map in the context
+    // TODO: here we are probably overriding previous accessMap of parent items.
+    // TODO: any potential issue? It is still the same context I guess
+    ctx.accessMap = accessMap;
+
+    if (accessMap.isFails()) {
+      debug('access map fails - interrupt chain');
+      return;
+    }
+
+    // TODO: The only deference between all methods is prefetch algorithm - handle it!
+    /// GOOD point that we don't need to prefetch
+    // Check if we need to make a preliminarily request of some data to build final access map
+    if (!accessMap.hasAtLeastOneTrueValue() && accessMap.hasDependentRules()) {
+      debug('skip ACL check because of dep rules - it will be handled later');
+      // because of dependent rules we need to fetch this doc anyway to know parent id
+      // the acl will be handled in postACL method
+      return next();
+    }
+
+    // Compile access map to single query
+
+    // We don't need apply query if no documents can be skipped
+    if (accessMap.hasAtLeastOneTrueValue()) {
+      debug('Not need to apply query - no documents might be skipped');
+      return next();
+    }
+
+    debug('need to apply query');
+
+    // Try to build query as we possibly need it
+    let query = await accessMap.getQuery();
+
+    if (!query) {
+      debug('No query was produced');
+      return next();
+    }
+
+    debug('applying query', query);
+
+    // Apply query
+    options.query = Object.assign(options.query || {}, query);
+
+    debug('applied query', options.query);
+
+    next();
   }
 
   /**
@@ -545,9 +616,9 @@ export default class Model {
         // check if _ instance of model model model
         hl('prefetch data iteration');
 
-        if (_ instanceof data.model.model) {
+        if (_[0] instanceof data.model.model) {
           hl('_ instance of model! no need to fetch');
-          data.data = [_];
+          data.data = _;
           continue;
         }
 
@@ -672,6 +743,174 @@ export default class Model {
   }
 
   /**
+   * handle read one acl
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async postHandleReadOneACL(result, next, options, _, args, ctx) {
+    hl('postHandleReadOneACL', ctx.accessMap);
+    hl('%j', ctx.accessMap.accessMap, ctx.accessMap.accessMap.id);
+
+    debug('result', result);
+
+    // Skip if no access map defined
+    if (!ctx.accessMap) {
+      debug('no access map defined for postACL');
+      return next();
+    }
+
+    // Skip for empty result
+    if (!result && !result.result) {
+      debug('no result - skip');
+      return next();
+    }
+
+    debug('initProps dep', ctx.accessMap.initialProps.hasDependentRules);
+    debug('initProps has true', ctx.accessMap.initialProps.hasAtLeastOneTrueValue);
+
+    // Access map might be changed to this step, but we need to check initial configuration
+    // TODO: replace not obvious check with something like hasUnresolvedDependencies
+    // TODO: it is very unclear why we are checking it below
+    if (ctx.accessMap.initialProps.hasDependentRules) {
+      hl('accessMap has dependent rules and not able to skip values');
+
+      // lets get needed relations and foreignKeys in order to collect parent ids
+      // iterate dependent rules
+      // build models map
+      let dependentRules = ctx.accessMap.getDependentRules();
+
+      let modelsMap = {};
+      for (let rule of dependentRules) {
+        let model = ctx.accessMap.getDependentModel(rule);
+        let modelName = model.getName();
+
+        // Initialize
+        if (modelsMap[modelName]) {
+          continue;
+        }
+
+        modelsMap[modelName] = {
+          model: model,
+          // TODO: apply same fix on all
+          foreignKey: this.schema.properties[modelName].foreignKey,
+          ids: new Set()
+        }
+      }
+
+      hl('initial modelsMap', modelsMap);
+
+      // TODO: actually for single document query there will be only one id
+      let doc = result.result;
+      for (let val of Object.values(modelsMap)) {
+        hl('fk, doc %j', val.foreignKey, doc);
+        if (doc[val.foreignKey]) {
+          hl('add id', val.foreignKey, doc[val.foreignKey]);
+          val.ids.add(doc[val.foreignKey]);
+        }
+      }
+
+      hl('filled models map', modelsMap);
+
+      // Then iterate map perform queries
+      // TODO: we need only limited fields to be fetched
+      // TODO: use Promise.all
+      for (let val of Object.values(modelsMap)) {
+
+        hl('fetching ids', val.ids);
+
+
+        // TODO: handle not found case
+        // TODO: apply same fix on ALL
+        val.data = await val.model.model.find({ _id: { '$in': Array.from(val.ids) } });
+        hl('fetched data', val.data);
+      }
+
+      hl('map with queried data %j', modelsMap);
+
+      debug('apply dependent data');
+      ctx.accessMap.applyDependentData(modelsMap);
+
+
+      hl('after apply dep data', ctx.accessMap.accessMap);
+    }
+
+    let doc = clone(result.result);
+    ctx.accessMap.buildRuleSetQueries();
+    // Cache query results
+    let testedQueries = {};
+
+    // TODO: merge with postReadAllACL
+
+    for (let prop of Object.keys(ctx.accessMap.accessMap)) {
+      let val = ctx.accessMap.accessMap[prop];
+
+      debug('accessMap val %j', val);
+      let allow;
+
+      if (typeof(val) ==='boolean') {
+        allow = val;
+      } else {
+        debug('not boolean value');
+        let query = val.query;
+
+        hl('query', val.query);
+        // Apply query on object
+        // TODO: we don't need md5
+        let queryId = md5(JSON.stringify(query));
+        // Check for cached result
+        if (testedQueries[queryId] !== undefined) {
+          allow = testedQueries[queryId];
+          debug('extract allow from cache', allow);
+        } else {
+          debug('need to apply query %j', query);
+          debug('to data', [doc]);
+          // Apply query
+          // TODO: probably, we should put data formatting in the last middleware
+          // TODO: and not access node here
+          let queryResult = sift(query, [doc]);
+
+          if (queryResult.length) {
+            hl('query matched doc');
+            allow = true;
+          } else {
+            hl('query does not match the doc');
+            allow = false;
+          }
+          testedQueries[queryId] = allow;
+        }
+      }
+
+      if (!allow) {
+
+        // FIXME: quick workaround
+        if (prop == 'id') {
+          doc['_id'] = null;
+          continue;
+        }
+
+        // TODO: probably, we should put data formatting in the last middleware
+        // TODO: and not access node here
+        // TODO: should we actually remove property completely with delete
+        // TODO: we currently operate with mongoose objects
+        // TODO: should we ever convert it to plain objects
+        doc[prop] = null;
+      }
+
+      debug('doc iteration result', doc);
+
+      result.result = doc;
+    }
+
+    next();
+  }
+
+  /**
    * Handle read all ACL after data is fetched
    * In this method we should filter resulting data according an access map
    *
@@ -730,7 +969,7 @@ export default class Model {
 
         modelsMap[modelName] = {
           model: model,
-          foreignKey: this.schema.properties[modelName],
+          foreignKey: this.schema.properties[modelName].foreignKey,
           ids: new Set()
         }
       }
@@ -754,7 +993,7 @@ export default class Model {
       // TODO: we need only limited fields to be fetched
       // TODO: use Promise.all
       for (let val of Object.values(modelsMap)) {
-        val.data = await val.model.model.find({ _id: { '$in': val.ids } })
+        val.data = await val.model.model.find({ _id: { '$in': Array.from(val.ids) } })
       }
 
       debug('map with queried data', modelsMap);
@@ -1571,7 +1810,7 @@ export default class Model {
   }
 
   /**
-   * Entrypoint for resolving single item
+   * Entry point for resolving single item
    *
    * @param options
    * @param _
@@ -1580,7 +1819,14 @@ export default class Model {
    * @returns {{}}
    */
   async resolveOne(options, _, args, ctx) {
-    return this.resolveItem(options, _, args, ctx);
+
+    debug('resolveOne', options);
+
+    options.actionType = 'one';
+
+    //return this.resolveItem(options, _, args, ctx);
+
+    return (await this.processChain(this.getReadChain(), ...arguments)).result;
   }
 
   /**
@@ -1596,7 +1842,7 @@ export default class Model {
   }
 
   /**
-   * Entrypoint for resolving allItems
+   * Entry point for resolving allItems
    *
    * @param options
    * @param _
@@ -1620,16 +1866,70 @@ export default class Model {
    * @returns {Promise.<{}>}
    */
   async resolveHasMany(options, _, args, ctx) {
+
+    // _ is now an array...
+
+    let ids = _.map(item => item._id);
+
+    debug('resolveHasMany ids', ids);
+
     // Specifying additional condition
     options.query = {
-      [options.property.foreignKey]: _._id
+      //[options.property.foreignKey]: _._id
+      [options.property.foreignKey]: { '$in': ids }
     };
 
     options.actionType = 'hasMany';
 
     debug('resolveHasMany', options);
 
+    // TODO: okay resolve has many should not actually run the query - should not actually process that stuff
+    // Dataloader should run that chain. actual resolve should happen
+
     return (await this.processChain(this.getReadChain(), ...arguments)).result;
+  }
+
+  /**
+   * Function that used in hasMany dataloader for batch loading hasMany entires avoiding N+1 issue
+   *
+   * @returns {Promise.<void>}
+   */
+  async batchLoadHasMany(paramsCollection) {
+    hl('dataLoader invoked', paramsCollection);
+
+    let _ = paramsCollection.map(params => params.arguments[0]);
+
+    // TODO immutable
+    let args = clone(paramsCollection[0].arguments);
+    args[0] = _;
+
+    let options = paramsCollection[0].options;
+
+    let fk = options.property.foreignKey;
+
+    hl('options', options);
+    hl('fk', fk);
+
+    let result = await this.resolveHasMany(options, ...args);
+
+    let edges = result.edges || [];
+
+    hl('hasManyResolve result', result);
+
+    // dataloader requires result to be returned strictly according to passed paramsCollection
+    return paramsCollection.map((params) => {
+
+      let id = params.arguments[0].id;
+
+      let result = edges.filter(e => {
+        return e.node[fk].toString() === id.toString()
+      });
+
+      // FIXME: we have to spoof pageInfo and cursor - otherwise error will be thrown
+      return {
+        edges: result
+      };
+    });
   }
 
   /**
@@ -1661,6 +1961,19 @@ export default class Model {
    */
   async processRead(result, next, options, _, args, ctx) {
     debug('processRead');
+
+    // TODO: lets handle it here for now:
+    if (options.actionType === 'one') {
+      debug('processOne - apply single item query');
+      options.method = 'findOne';
+
+      if (!options.query) {
+        options.query = {};
+      }
+      // TODO: don't actually remember why we have to select options.id or args.id
+      Object.assign(options.query, { _id: new mongoose.Types.ObjectId(options.id || args.id) });
+    }
+
     result.result = await this.query.bind(this, options, _, args)();
     next();
   }
