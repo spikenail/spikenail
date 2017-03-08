@@ -191,14 +191,12 @@ class Spikenail extends EventEmitter {
       (globalId, ctx) => {
         let {type, id} = fromGlobalId(globalId);
 
-        debug('nodeInterface - globalId', type, id, ctx);
+        let params = {
+          id: id
+        };
 
-        let dataLoader = ctx.state.dataLoaders[type];
-        if (!dataLoader) {
-          return null;
-        }
-
-        return dataLoader.load(id);
+        // TODO: not sure that these are correct arguments
+        return this.models[type].resolveOne(params, null, [], ctx);
       },
       (obj) => {
         debug('nodeField - obj - constructor', obj.constructor.modelName);
