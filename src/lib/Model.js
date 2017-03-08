@@ -1830,18 +1830,6 @@ export default class Model {
   }
 
   /**
-   * Entrypoint for resolving belongsTo relation
-   *
-   * @param options
-   * @param _
-   * @param args
-   * @param ctx
-   */
-  resolveBelongsTo(options, _, args, ctx) {
-    // TODO
-  }
-
-  /**
    * Entry point for resolving allItems
    *
    * @param options
@@ -1867,8 +1855,6 @@ export default class Model {
    */
   async resolveHasMany(options, _, args, ctx) {
 
-    // _ is now an array...
-
     if (!Array.isArray(_)) {
       _ = [_];
     }
@@ -1887,9 +1873,41 @@ export default class Model {
 
     debug('resolveHasMany', options);
 
-    // TODO: okay resolve has many should not actually run the query - should not actually process that stuff
-    // Dataloader should run that chain. actual resolve should happen
+    return (await this.processChain(this.getReadChain(), ...arguments)).result;
+  }
 
+
+  /**
+   * Entrypoint for resolving belongsTo relation
+   *
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   */
+  async resolveBelongsTo(options, _, args, ctx) {
+
+    debug('belongsTo');
+
+    if (!Array.isArray(_)) {
+      _ = [_];
+    }
+
+    let ids = _.map(item => item[options.property.foreignKey]);
+
+    debug('ids', ids);
+
+    // TODO: Should we remove duplicates?
+
+    options.query = {
+      //[options.property.foreignKey]: _._id
+      _id: { '$in': ids }
+    };
+
+    // TODO: Let's use hasMany chain here for now
+    // We need to do refactoring later
+    // The only difference between "all" and "hasMany" is that hasMany is taking in account parent items fetched
+    options.actionType = 'hasMany';
     return (await this.processChain(this.getReadChain(), ...arguments)).result;
   }
 
@@ -1903,7 +1921,6 @@ export default class Model {
 
     let _ = paramsCollection.map(params => params.arguments[0]);
 
-    // TODO immutable
     let args = clone(paramsCollection[0].arguments);
     args[0] = _;
 
@@ -1945,13 +1962,53 @@ export default class Model {
 
   /**
    * BelongsTo batching function for dataloader in order to avoid N+1 issue
+   * TODO: in some cases we might queried parent items at ACL checking step
+   * TODO: so we need to implement using of dataloader cache here
    *
    * @param paramsCollection
    * @returns {Promise.<void>}
    */
   async batchBelongsTo(paramsCollection) {
     hl('batchBelongsTo');
-    // TODO
+
+    let _ = paramsCollection.map(params => params.arguments[0]);
+
+    let args = clone(paramsCollection[0].arguments);
+    args[0] = _;
+
+    let options = paramsCollection[0].options;
+
+    let fk = options.property.foreignKey;
+
+    hl('options', options);
+    hl('fk', fk);
+
+    let result = await this.resolveBelongsTo(options, ...args);
+
+    hl('resolveBelongsTo result', result);
+
+    let edges = result.edges || [];
+
+    // dataloader requires result to be returned strictly according to passed paramsCollection
+    return paramsCollection.map((params) => {
+
+      let id = params.arguments[0][fk];
+
+      hl('params - fk id', id);
+
+      // TODO: "edges" as we use same functions as for hasMany
+      let result = edges.filter(e => {
+
+
+        hl('id comparison', e.node.id, id);
+
+        return e.node.id.toString() === id.toString()
+      });
+
+      hl('result[0]', result[0]);
+
+      return result[0] ? result[0].node : null;
+    });
   }
 
   /**

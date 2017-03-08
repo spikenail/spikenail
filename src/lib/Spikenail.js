@@ -599,10 +599,28 @@ class Spikenail extends EventEmitter {
 
               return await ctx.dataLoaders[this.models[field.ref].getName() + 'HasManyLoader'].load(params);
 
-
-
             }).bind(this)
           };
+        }
+
+        if (field.relation === 'belongsTo') {
+          fields[prop] = {
+            type: type,
+            resolve: (async function(_, args, ctx) {
+
+              xhl('resolver - resolve belongsTo');
+
+              let params = {
+                options: {
+                  property: field
+                },
+                arguments: [...arguments]
+              };
+
+              return await ctx.dataLoaders[this.models[field.ref].getName() + 'BelongsToLoader'].load(params);
+
+            }).bind(this)
+          }
         }
 
         continue;
