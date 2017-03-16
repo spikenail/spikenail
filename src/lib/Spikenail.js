@@ -1,7 +1,5 @@
 const debug = require('debug')('spikenail:Spikenail');
 
-const xhl = require('debug')('xhl');
-
 import Koa from 'koa';
 import convert from 'koa-convert';
 import graphqlHTTP from 'koa-graphql';
@@ -75,6 +73,7 @@ class Spikenail extends EventEmitter {
 
       // Load models
       this.models = await this.loadModels();
+      this.initializeModels();
 
       // Generate and expose graphql schema
       if (Object.keys(this.models).length) {
@@ -107,6 +106,17 @@ class Spikenail extends EventEmitter {
       });
     } catch (err) {
       console.error(err);
+    }
+  }
+
+  /**
+   * Set some defaults check for validity etc
+   */
+  initializeModels() {
+    debug('initialize models');
+    for (let modelName of Object.keys(this.models)) {
+      // TODO: need to also validate ACLs and throw error if something wrong
+      this.models[modelName].initializeACLs();
     }
   }
 
@@ -199,7 +209,6 @@ class Spikenail extends EventEmitter {
         return this.models[type].resolveOne(params, null, [], ctx);
       },
       (obj) => {
-        debug('nodeField - obj - constructor', obj.constructor.modelName);
         return modelTypes[obj.constructor.modelName] || null;
       }
     );
@@ -214,7 +223,6 @@ class Spikenail extends EventEmitter {
     // Determine viewer model if exists
     let viewerModel;
     for (const className of Object.keys(models)) {
-      debug('preparing model:', className);
 
       let model = models[className];
 
@@ -226,13 +234,10 @@ class Spikenail extends EventEmitter {
       // Lets determine viewer model
       // TODO: not sure if we actually need a flag for it. It is easier to always use model named User as viewer
       if (model.isViewer()) {
-        debug('Viewer model found');
         viewerModel = model;
       }
 
       let name = model.getName();
-
-      debug('prepate graphql type for model', className);
 
       // Create placeholder for fields
       modelFields[name] = {};
@@ -263,7 +268,6 @@ class Spikenail extends EventEmitter {
 
     // Now fill modelFields and viewer fields
     for (const className of Object.keys(models)) {
-      debug('filling graphql type fields for:', className);
 
       let model = models[className];
 
@@ -295,8 +299,6 @@ class Spikenail extends EventEmitter {
       };
     }
 
-    debug('modelTypes', modelTypes);
-
     let viewer;
     if (Object.keys(viewerFields).length) {
       viewer = {
@@ -315,7 +317,6 @@ class Spikenail extends EventEmitter {
     // Create mutations
     let mutationFields = {};
     for (const className of Object.keys(models)) {
-      debug('Loading model:', className);
 
       let model = models[className];
 
@@ -353,14 +354,10 @@ class Spikenail extends EventEmitter {
       fields: () => (queryFields)
     });
 
-    debug('RootQuery schema created');
-
     let finalSchema = new GraphQLSchema({
       query: RootQuery,
       mutation: RootMutation
     });
-
-    debug('Final schema created');
 
     return finalSchema;
   }
@@ -375,7 +372,6 @@ class Spikenail extends EventEmitter {
    * @returns {{}}
    */
   buildCRUDMutation(action, model, types, viewer) {
-    debug('buildMutation', action);
     const mutationName = action + capitalize(model.getName());
     let mutationFields = this.schemaToMutationFields(model.schema);
 
@@ -396,8 +392,6 @@ class Spikenail extends EventEmitter {
         if (!result || !result.id) {
           return null;
         }
-
-        debug('createMutation - outputFields resolve', result.id);
 
         // TODO: handle no id case
         return model.resolveOne({ id: result.id }, ...arguments);
@@ -463,7 +457,6 @@ class Spikenail extends EventEmitter {
    */
   wrapTypeIntoConnection(type, parentName, resolve) {
     let name = type.name;
-    debug('wrapTypeIntoConnection', name);
     // Relay (edges behaviour)
     let Edge = new GraphQLObjectType({
       name: parentName + '_' + name + 'Edge',
@@ -512,7 +505,6 @@ class Spikenail extends EventEmitter {
    * @param types Other available types
    */
   schemaToGraphqlFields(schema, types) {
-    debug('schemaToGraphqlType' ,schema);
 
     // TODO: support auto createdat, updatedat
 
@@ -521,11 +513,8 @@ class Spikenail extends EventEmitter {
     for (let prop of Object.keys(schema.properties)) {
       let field = schema.properties[prop];
 
-      debug('field', field);
-
       // Handle relation
       if (field.relation) {
-        debug('createGraphqlType, handle relation', field);
 
         let type = types[field.ref];
 
@@ -536,8 +525,6 @@ class Spikenail extends EventEmitter {
         //}
 
         if (field.relation == 'hasMany') {
-
-          debug('hasMany');
 
           // Relay (edges behaviour)
           let Edge = new GraphQLObjectType({
@@ -573,8 +560,6 @@ class Spikenail extends EventEmitter {
             args: this.models[field.ref].getGraphqlListArgs(),
             resolve: (async function(_, args, ctx) {
 
-              xhl('resolver - resolve hasMany');
-
               let params = {
                 options: {
                   property: field
@@ -587,8 +572,6 @@ class Spikenail extends EventEmitter {
               // check if pagination params passed
               // TODO: hasPaginationArgs
               if (args.first || args.after) {
-
-                xhl('pagination params found', args);
 
                 return this.models[field.ref].resolveHasMany({
                   property: field
@@ -605,8 +588,6 @@ class Spikenail extends EventEmitter {
           fields[prop] = {
             type: type,
             resolve: (async function(_, args, ctx) {
-
-              xhl('resolver - resolve belongsTo');
 
               let params = {
                 options: {
@@ -643,7 +624,6 @@ class Spikenail extends EventEmitter {
 
     for (let prop of Object.keys(schema.properties)) {
       let field = schema.properties[prop];
-      debug('field', field);
 
       // Skip relations for now
       if (field.relation) {
@@ -655,7 +635,6 @@ class Spikenail extends EventEmitter {
       // Just strip all not null for now
       // TODO: quickfix ? don't
       fields[prop].type = getNullableType(fields[prop].type);
-      debug('Nullable type', fields[prop]);
     }
 
     return fields;
@@ -683,8 +662,6 @@ class Spikenail extends EventEmitter {
    */
   fieldToGraphqlType(prop, field, schema) {
     let type = field.type;
-
-    debug('fieldToGraphqlType', prop, field, schema);
 
     switch(type) {
       case 'id':

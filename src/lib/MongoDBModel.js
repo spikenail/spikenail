@@ -107,15 +107,25 @@ export default class MongoDBModel extends Model {
    * Process create
    *
    * @param result
+   * @param next
    * @param opts
    * @param input
    * @param ctx
-   * @returns {{result: input}}
+   * @returns {Promise.<void>}
    */
   async processCreate(result, next, opts, input, ctx) {
     debug('processCreate', input);
 
-    input.userId = ctx.currentUser._id;
+    // Substitute current userId if not specified and if possible
+    if (!input.userId && ctx.currentUser && ctx.currentUser._id && this.schema.properties.userId) {
+      debug('need to substitute current userId');
+      // It worth noting that editing of userId should be restricted - otherwise transfer will be possible
+      // If necessary - on validation step we have to specify userId as not null
+
+      // TODO: userId is a special property - it is currently hardcoded but might be configured somehow
+      input.userId = ctx.currentUser._id;
+    }
+
     let item = await this.model.create(input);
 
     debug('processCreate item', item);

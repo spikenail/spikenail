@@ -65,7 +65,11 @@ export default class MongoAccessMap {
       hl('Injection model found:', model.getName());
 
       // Create access map for the
-      let injectAccessMap = new MongoAccessMap(model, this.ctx, this.options);
+      let opts = {};
+      if (rule.action) {
+        opts.action = rule.action;
+      }
+      let injectAccessMap = new MongoAccessMap(model, this.ctx, Object.assign(this.options, opts));
       await injectAccessMap.init();
 
       // TODO: we have to throw an error if it has dependent rules as we are likely to unable handle this case for now
@@ -139,15 +143,15 @@ export default class MongoAccessMap {
     this.acls = this.sourceACLs
       .filter(this.isRuleMatchAction(this.options.action)) // TODO: defaults? throw error?
       .map(this.removeImpossibleRoles.bind(this, this.ctx))
-      .map(this.markAsDeferred.bind(this, this.staticRoles))
-      .filter(rule => !!rule.roles.length);
+      .filter(rule => !!rule.roles.length)
+      .map(this.filterRuleProperties.bind(this, this.options.properties))
+      .filter(rule => !!rule);
 
     // Store flags to check what data has already built
     this.built = {};
 
-    // TODO: should we ever run something here
     // Build map without queries
-    this.accessMap = this.buildAccessMap(this.acls);
+    this.accessMap = await this.buildAccessMap(this.acls);
 
     // Save some initial properties
     // TODO: not sure how to implement it better, so let's use quick fix for now
@@ -156,6 +160,33 @@ export default class MongoAccessMap {
     this.initialProps = {};
     this.initialProps.hasDependentRules = this.hasDependentRules();
     this.initialProps.hasAtLeastOneTrueValue = this.hasAtLeastOneTrueValue();
+  }
+
+  /**
+   * Remove unmatched properties if specified
+   *
+   * @param properties
+   * @param sourceRule
+   * @returns {*}
+   */
+  filterRuleProperties(properties, sourceRule) {
+    if (!properties) {
+      return sourceRule;
+    }
+
+    let rule = clone(sourceRule);
+
+    if (~rule.properties.indexOf('*')) {
+      return rule;
+    }
+
+    rule.properties = rule.properties.filter(prop => ~properties.indexOf(prop));
+
+    if (!rule.properties.length) {
+      return null;
+    }
+
+    return rule;
   }
 
   /**
@@ -262,7 +293,7 @@ export default class MongoAccessMap {
    *
    * @param acls raw schema acl rules defined by user
    */
-  buildAccessMap(acls) {
+  async buildAccessMap(acls) {
 
     debug('buildAccessMap. acls:', acls);
 
@@ -285,25 +316,89 @@ export default class MongoAccessMap {
       debug('iterating rule', index, rule);
 
       let applyValue = rule.allow;
-      if (rule.deferred === true) {
+
+      // First of all lets check if it is dependent rule and could be resolved in place
+      if (this.isDependentRule(rule)) {
+        debug('rule is dependent - try to resolve');
+        let depModel = this.getDependentModel(rule);
+
+        // Build access map for dependent model
+        // TODO: memoize
+
+        let opts = { roles: rule.roles };
+
+        // Ability to specify for which action we are checking access relation
+        if (rule.checkAction) {
+          opts.action = rule.checkAction
+        }
+
+        let depAccessMap = new MongoAccessMap(
+          depModel,
+          this.ctx,
+          Object.assign(
+            clone(this.options),
+            opts
+          )
+        );
+        await depAccessMap.init();
+
+        // Currently, check for at least one true value for given roles of course
+        if (depAccessMap.hasAtLeastOneTrueValue()) {
+          hl('dependent map has true value');
+          // allow all
+          applyValue = {
+            allow: true,
+            fields: ['*'],
+            roles: ['*'], // roles make no sense in built map???
+            actions: [this.options.action]
+          }
+        } else if (depAccessMap.isFails()) {
+          hl('dependent map fails');
+          // build query
+          applyValue = {
+            allow: false,
+            fields: ['*'],
+            roles: ['*'],
+            actions: [this.options.action]
+          }
+        } else {
+          hl('dependent accessmap is not determined');
+          // Unable to instantly determine an access based on static roles
+          // build query and use it as scope
+
+          // An issue - constructor is not async stuff
+          let query = await depAccessMap.getQuery();
+          hl('dep query is %j', query);
+          // TODO: we could possibly pick up the query of _id/or lists field only
+          // TODO: means simplest query that will give us allow true value
+
+          // Synthetic rule where scope is query on dependent model
+          applyValue = {
+            // allow only in case we allow to access dependent relation
+            allow: true,
+            fields: ['*'],
+            roles: ['*'],
+            //test: 123,
+            scope: function () { return query },
+            actions: [this.options.action],
+            checkRelation: depModel.getName()
+          }
+        }
+      } else if (this.isDeferredRule(rule)) {
+        debug('rule is deferred');
         applyValue = clone(rule);
-        // Set temporary id in order to simplify further calculations
-        // TODO: as we using hash, below is probably not needed anymore
-        //applyValue.id = index;
       }
 
       debug('applyValue:', applyValue);
-
-      // TODO: quick fix. move it to models initialization step
-      if (!rule.properties)  {
-        rule.properties = ['*'];
-      }
 
       // Apply rule to specific properties of model
       for (let prop of rule.properties) {
         debug('iterating rule properties', prop);
         if (prop === '*') {
-          for (let prop of Object.keys(accessMap)) {
+          // Properties could be manually specified by user
+          let props = this.options.properties || Object.keys(accessMap);
+
+          for (let prop of props) {
 
             debug('* iterate all - ', prop);
             // TODO: no time to think why we need all these clone statements
@@ -731,6 +826,22 @@ export default class MongoAccessMap {
   }
 
   /**
+   * Check that all values are boolean true values
+   *
+   * @returns {boolean|*}
+   */
+  isPassing() {
+    debug('isPassing');
+    return Object.values(this.accessMap).every(item => {
+      if (typeof(item) !== "boolean") {
+        return false;
+      }
+
+      return !!item;
+    });
+  }
+
+  /**
    * If access map
    * If at least one value of access map is true
    *
@@ -739,6 +850,20 @@ export default class MongoAccessMap {
   hasAtLeastOneTrueValue() {
     for (let val of Object.values(this.accessMap)) {
       if (typeof(val) === 'boolean' && val) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   *
+   * @returns {boolean}
+   */
+  hasAtLeastOneFalseValue() {
+    for (let val of Object.values(this.accessMap)) {
+      if (typeof(val) === 'boolean' && !val) {
         return true;
       }
     }
@@ -1047,8 +1172,13 @@ export default class MongoAccessMap {
 
     let rule = clone(sourceRule);
 
-    // 1. Get possible roles:
-    // all possible (defined) dynamic roles + static roles of current user
+    // If rule * exists - left only it
+    // TODO: should be on app initialization step
+    if (~rule.roles.indexOf('*')) {
+      rule.roles = ['*'];
+      debug('Match * role, result', rule);
+      return rule;
+    }
 
     // Get dynamic roles for model from current model or related
     let dynamicRoles = this.isDependentRule(rule)
@@ -1056,48 +1186,35 @@ export default class MongoAccessMap {
       : this.model.getDynamicRoleNames(ctx);
     debug('dynamicRoles', dynamicRoles);
 
-    // Get static roles that based on currentUser stored in context
-    //let staticRoles = this.getStaticRoles(ctx);
-    debug('staticRoles', this.staticRoles);
+    let roles = [];
 
-    // If rule * exists - left only it
-    if (~rule.roles.indexOf('*')) {
-      rule.roles = ['*'];
-      debug('Match * role, result', rule);
-      return rule;
-    }
-
-    // Try to match static roles
     let matchedStaticRoles = this.getMatchedRoles(rule, this.staticRoles);
-    if (matchedStaticRoles.length) {
-      // If static roles matched - left only one matched static role
-      // This way we just trim redundant roles
-      rule.roles = [matchedStaticRoles[0]];
+    debug('- matchedStaticRoles', matchedStaticRoles);
 
-      debug('Match static roles, result', rule);
+    roles = roles.concat(matchedStaticRoles);
 
-      return rule;
-    }
-
-    // no static roles are matched
-    // theoretically only dynamic roles left
+    // todo should be on app init step
     let matchedDynamicRoles = this.getMatchedRoles(rule, dynamicRoles);
-    if (matchedDynamicRoles.length) {
-      // left only dynamic roles
-      // TODO: this is probably redundant
-      // TODO: A invalid roles should be filtered on initialization step
-      rule.roles = matchedDynamicRoles;
-      debug('Match dynamic roles, result', rule);
-      return rule;
+
+    roles = roles.concat(matchedDynamicRoles);
+
+    // It is possible to manually specify roles for which we will build access map
+    if (this.options.roles && !~this.options.roles.indexOf('*')) {
+      roles = this.options.roles;
     }
 
-    rule.roles = [];
+    debug('- filter with roles', roles);
 
-    debug('Not match any role, result', rule);
+    debug('- rule.roles before', rule.roles);
+    // remove all roles that not in matched roles
+    rule.roles = rule.roles.filter(role => {
+      return ~roles.indexOf(role);
+    });
+
+    debug('- rule.roles after', rule.roles);
 
     return rule;
   }
-
 
   /**
    * Set deferred property of the rule
@@ -1127,12 +1244,23 @@ export default class MongoAccessMap {
 
       // Static rules can't be dependent rules
       // TODO: not sure it should be placed here
+      // TODO: тут в общем концептуальная ошибка
       delete rule.checkRelation;
 
       rule.deferred = false;
     }
 
     return rule;
+  }
+
+  /**
+   * Check if rule is deferred - allow value could not be calculated immediately
+   *
+   * @param rule
+   */
+  isDeferredRule(rule) {
+    // TODO: the purpose of this is not really clear. Change algorithm
+    return (rule.scope || (!~rule.roles.indexOf('*') && !this.isRuleMatchRoles(rule, this.staticRoles)))
   }
 
   /**

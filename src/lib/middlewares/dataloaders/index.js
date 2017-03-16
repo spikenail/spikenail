@@ -25,7 +25,6 @@ export default function(options) {
       // Batch belongsTo
       dataLoaders[name + 'BelongsToLoader'] = new DataLoader(model.batchBelongsTo.bind(model), { cache: false });
     }
-    console.log('dataLoaders', dataLoaders);
 
     // TODO: what the purpose of the state?
     ctx.state.dataLoaders = dataLoaders;

@@ -248,21 +248,13 @@ export default class Model {
    * Process create
    *
    * @param result
+   * @param next
    * @param opts
    * @param input
    * @param ctx
-   * @returns {{result: input}}
+   * @returns {Promise.<void>}
    */
   async processCreate(result, next, opts, input, ctx) {
-    debug('processCreate', input);
-
-    input.userId = ctx.currentUser._id;
-    let item = await this.model.create(input);
-
-    debug('processCreate item', item);
-
-    result.result = item;
-
     next();
   }
 
@@ -381,8 +373,264 @@ export default class Model {
     next();
   }
 
+
+  /**
+   * Handle create ACL
+   *
+   * @returns {Promise.<void>}
+   */
+  async handleCreateACL(result, next, options, _, args, ctx) {
+    debug('handle Create ACL');
+
+    // Create access map for current model, specifying only props that we trying to save
+    let accessMap = new MongoAccessMap(this, ctx, { action: options.action, properties: Object.keys(_) });
+    await accessMap.init();
+
+    ctx.accessMap = accessMap;
+
+    // If access map has at least one strict false value we throw 403 error
+    // We can't just trim this value and save all other, as it might lead to misunderstanding
+    if (accessMap.hasAtLeastOneFalseValue()) {
+      result.errors = [{
+        message: 'Access denied',
+        code: '403'
+      }];
+
+      return;
+    }
+
+    // Check if access map has dependent rules
+    if (accessMap.hasDependentRules()) {
+      debug('access map has dependent rules - fetch dep data');
+      // Fetch dependent data and apply
+      let data = await this.fetchDataForDependentRules(accessMap, _);
+      debug('fetched data', data);
+      accessMap.applyDependentData(data);
+      accessMap.buildRuleSetQueries();
+
+      // Check one more time - as applying dependent data might produce false values
+      if (accessMap.hasAtLeastOneFalseValue()) {
+        debug('additional check of at least one false value');
+        result.errors = [{
+          message: 'Access denied',
+          code: '403'
+        }];
+
+        return;
+      }
+    }
+
+    // Check for all true values
+    if (accessMap.isPassing()) {
+      debug('access map is passing - continue');
+      return next();
+    }
+
+    // If not passing and does not have at least one false value - try to build query
+    let query = await accessMap.getQuery();
+
+    // Apply query on input data to check
+
+    debug('query', query, 'data', [_]);
+
+    if (!(sift(query, [_])).length) {
+      debug('sift - false');
+      result.errors = [{
+        message: 'Access denied',
+        code: '403'
+      }];
+
+      return;
+    }
+
+    debug('all nice - continue');
+    next();
+  }
+
+  /**
+   * Set ACL defaults etc
+   */
+  initializeACLs() {
+    if (!this.schema.acls) {
+      return;
+    }
+
+    for (let rule of this.schema.acls) {
+      if (!rule.properties) {
+        rule.properties = ['*'];
+      }
+    }
+  }
+
+
+  /**
+   * Handle ACL for Create, Update, Delete actions
+   *
+   *
+   * TODO: WIP
+   *
+   * @param result
+   * @param next
+   * @param opts
+   * @param input
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async handleUpdateACL(result, next, options, _, args, ctx) {
+    debug('handle CUDACL');
+
+    // We need to get input here
+
+    debug('result', result);
+    debug('_', _);
+    debug('args', args);
+
+    return;
+
+    let accessMap = new MongoAccessMap(this, ctx, { action: opts.action, properties: Object.keys(_) });
+    await accessMap.init();
+    ctx.accessMap = accessMap;
+
+    debug('acl map initialized');
+
+    if (accessMap.isFails()) {
+      debug('Access map fails');
+      result.errors = [{
+        message: 'Access denied',
+        code: '403'
+      }];
+
+      return;
+    }
+
+    // if (!accessMap.hasAtLeastOneTrueValue() && accessMap.hasDependentRules()) {
+    //
+    //   // we need to query it
+    //
+    //   debug('skip ACL check because of dep rules - it will be handled later');
+    //   // because of dependent rules we need to fetch this doc anyway to know parent id
+    //   // the acl will be handled in postACL method
+    //   return next();
+    // } else {
+    //
+    //   // build query if possible
+    //
+    //
+    //
+    // }
+
+    // If no dep docs and
+    // !accessMap.hasDependentRules()  !accessMap.hasAtLeastOneTrueValue()
+    if (true) {
+      debug('need to build query before processing');
+
+      // Build query if possible and needed
+      let query = await accessMap.getQuery();
+      // no need to assign i guess
+      // Apply query
+      options.query = Object.assign(options.query || {}, query);
+
+    } else {
+
+    }
+
+    // Fetch document
+
+    // TODO: lets handle it here for now:
+    debug('fetching the document');
+    options.method = 'findOne';
+
+    if (!options.query) {
+      options.query = {};
+    }
+    // TODO: don't actually remember why we have to select options.id or args.id
+    Object.assign(options.query, { _id: new mongoose.Types.ObjectId(options.id || args.id) });
+
+    // Try to fetch the doc
+    // TODO: we need to cache this with data loader in order to avoid race-condition issues
+    // TODO: and not to fetch same doc twice
+    let doc = await this.query.bind(this, options, _, args)();
+
+    // if nothing found
+    // TODO: should we have explicit difference between not found and 403?
+
+    debug('fetched result', doc);
+
+    if (!doc) {
+      debug('No fetched document - means it not found with given conditions');
+      result.errors = [{
+        message: 'Access denied',
+        code: '403'
+      }];
+
+      return;
+    }
+
+    // Lets handle dependencies
+    if (ctx.accessMap.initialProps.hasDependentRules) {
+      hl('accessMap has dependent rules and not able to skip values');
+
+      let modelsMap = await this.fetchDataForDependentRules(ctx.accessMap, fetched);
+
+      debug('apply dependent data');
+      ctx.accessMap.applyDependentData(modelsMap);
+
+      hl('after apply dep data', ctx.accessMap.accessMap);
+    }
+
+    // TODO: this step is not obvious
+    ctx.accessMap.buildRuleSetQueries();
+
+    let resultData = this.applyAccessMapToData(ctx.accessMap, [doc]);
+
+    debug('resultData', resultData);
+
+    //result.result = resultData[0] || null;
+
+    // now need to decide
+    // should we abort or process
+
+    if (!resultData || !resultData.length) {
+
+    }
+
+    // apply query if  exists
+
+    // Compile access map to single query
+
+    // We don't need apply query if no documents can be skipped
+    // if (accessMap.hasAtLeastOneTrueValue()) {
+    //   debug('Not need to apply query - no documents might be skipped');
+    //   return next();
+    // }
+    //
+    // debug('need to apply query');
+    //
+    // // Try to build query as we possibly need it
+    // let query = await accessMap.getQuery();
+    //
+    // if (!query) {
+    //   debug('No query was produced');
+    //   return next();
+    // }
+    //
+    // debug('applying query', query);
+    //
+    //
+    //
+    // debug('applied query', options.query);
+    //
+    // debug('access map is OK');
+
+    next();
+
+
+  }
+
   /**
    * Handle ACL
+   *
+   * @deprecated
    *
    * @param result
    * @param next
@@ -406,7 +654,7 @@ export default class Model {
     let roles = await this.getRoles(possibleRoles, opts, input, ctx);
     debug('roles', roles);
 
-    let accessMap = this.createAccessMap(opts, input, roles, this.schema.acls);
+    let accessMap = this.createAccesMap(opts, input, roles, this.schema.acls);
 
     debug('accessMap', accessMap);
 
@@ -532,6 +780,8 @@ export default class Model {
     // TODO: The only deference between all methods is prefetch algorithm - handle it!
     /// GOOD point that we don't need to prefetch
     // Check if we need to make a preliminarily request of some data to build final access map
+    // TODO: anyway it is better to fetch here and put in dataloader cache
+    // TODO: it is very not obvious flow
     if (!accessMap.hasAtLeastOneTrueValue() && accessMap.hasDependentRules()) {
       debug('skip ACL check because of dep rules - it will be handled later');
       // because of dependent rules we need to fetch this doc anyway to know parent id
@@ -743,6 +993,150 @@ export default class Model {
   }
 
   /**
+   *
+   * @param accessMap
+   * @param data current data
+   */
+  async fetchDataForDependentRules(accessMap, sourceData) {
+
+    let data = sourceData;
+    if (!Array.isArray(sourceData)) {
+      data = [sourceData];
+    }
+
+    let dependentRules = accessMap.getDependentRules();
+
+    // Dependent models map initialization
+    let modelsMap = {};
+    for (let rule of dependentRules) {
+      let model = accessMap.getDependentModel(rule);
+      let modelName = model.getName();
+
+      // Initialize
+      if (modelsMap[modelName]) {
+        continue;
+      }
+
+      modelsMap[modelName] = {
+        model: model,
+        foreignKey: this.schema.properties[modelName].foreignKey,
+        ids: new Set()
+      }
+    }
+
+    hl('initial modelsMap', modelsMap);
+
+    // Fill ids array of modelsMap
+    for (let doc of data) {
+      for (let val of Object.values(modelsMap)) {
+        hl('fk, doc %j', val.foreignKey, doc);
+        if (doc[val.foreignKey]) {
+          hl('add id', val.foreignKey, doc[val.foreignKey]);
+          val.ids.add(doc[val.foreignKey]);
+        }
+      }
+    }
+
+    hl('filled models map', modelsMap);
+
+    // Then iterate map perform queries
+    // TODO: we need only limited fields to be fetched
+    // TODO: use Promise.all
+    for (let val of Object.values(modelsMap)) {
+
+      hl('fetching ids', val.ids);
+
+      // TODO: handle not found case
+      val.data = await val.model.model.find({ _id: { '$in': Array.from(val.ids) } });
+      hl('fetched data', val.data);
+    }
+
+    hl('map with queried data %j', modelsMap);
+
+    debug('apply dependent data');
+    //ctx.accessMap.applyDependentData(modelsMap);
+
+    return modelsMap;
+  }
+
+  /**
+   * Apply access map to data
+   * TODO: use this method in postHandleReadAllACL
+   *
+   * @param accessMap calculated accessMap
+   * @param data
+   */
+  applyAccessMapToData(accessMap, data) {
+    debug('applyAccessMapToData', data);
+
+    return data.map(sourceDoc => {
+      let doc = clone(sourceDoc);
+      hl('apply accessMapToData- doc iteration', doc);
+
+      // Cache query results
+      let testedQueries = {};
+      for (let prop of Object.keys(accessMap.accessMap)) {
+        let val = accessMap.accessMap[prop];
+
+        debug('accessMap val %j', val);
+        let allow;
+
+        if (typeof(val) ==='boolean') {
+          allow = val;
+        } else {
+          debug('not boolean value');
+          let query = val.query;
+
+          hl('query', val.query);
+          // Apply query on object
+          // TODO: we don't need md5
+          let queryId = md5(JSON.stringify(query));
+          // Check for cached result
+          if (testedQueries[queryId] !== undefined) {
+            allow = testedQueries[queryId];
+            debug('extract allow from cache', allow);
+          } else {
+            debug('need to apply query %j', query);
+            debug('to data', [doc]);
+            // Apply query
+            // TODO: probably, we should put data formatting in the last middleware
+            // TODO: and not access node here
+            let queryResult = sift(query, [doc]);
+
+            if (queryResult.length) {
+              hl('query matched doc');
+              allow = true;
+            } else {
+              hl('query does not match the doc');
+              allow = false;
+            }
+            testedQueries[queryId] = allow;
+          }
+        }
+
+        if (!allow) {
+          // FIXME: quick workaround
+          if (prop == 'id') {
+            doc['_id'] = null;
+            continue;
+          }
+
+          // TODO: should we actually remove property completely with delete
+          // TODO: we currently operate with mongoose objects
+          // TODO: should we ever convert it to plain objects
+          doc[prop] = null;
+        }
+
+        debug('doc iteration result', doc);
+      }
+
+      debug('resulting doc', doc);
+
+      return doc;
+    }); // TODO: should we apply filter and remove all-null objects
+  }
+
+  /**
    * handle read one acl
    *
    * @param result
@@ -766,7 +1160,7 @@ export default class Model {
     }
 
     // Skip for empty result
-    if (!result && !result.result) {
+    if (!result || !result.result) {
       debug('no result - skip');
       return next();
     }
@@ -780,132 +1174,24 @@ export default class Model {
     if (ctx.accessMap.initialProps.hasDependentRules) {
       hl('accessMap has dependent rules and not able to skip values');
 
-      // lets get needed relations and foreignKeys in order to collect parent ids
-      // iterate dependent rules
-      // build models map
-      let dependentRules = ctx.accessMap.getDependentRules();
-
-      let modelsMap = {};
-      for (let rule of dependentRules) {
-        let model = ctx.accessMap.getDependentModel(rule);
-        let modelName = model.getName();
-
-        // Initialize
-        if (modelsMap[modelName]) {
-          continue;
-        }
-
-        modelsMap[modelName] = {
-          model: model,
-          // TODO: apply same fix on all
-          foreignKey: this.schema.properties[modelName].foreignKey,
-          ids: new Set()
-        }
-      }
-
-      hl('initial modelsMap', modelsMap);
-
-      // TODO: actually for single document query there will be only one id
-      let doc = result.result;
-      for (let val of Object.values(modelsMap)) {
-        hl('fk, doc %j', val.foreignKey, doc);
-        if (doc[val.foreignKey]) {
-          hl('add id', val.foreignKey, doc[val.foreignKey]);
-          val.ids.add(doc[val.foreignKey]);
-        }
-      }
-
-      hl('filled models map', modelsMap);
-
-      // Then iterate map perform queries
-      // TODO: we need only limited fields to be fetched
-      // TODO: use Promise.all
-      for (let val of Object.values(modelsMap)) {
-
-        hl('fetching ids', val.ids);
-
-
-        // TODO: handle not found case
-        // TODO: apply same fix on ALL
-        val.data = await val.model.model.find({ _id: { '$in': Array.from(val.ids) } });
-        hl('fetched data', val.data);
-      }
-
-      hl('map with queried data %j', modelsMap);
+      let modelsMap = await this.fetchDataForDependentRules(ctx.accessMap, result.result);
 
       debug('apply dependent data');
       ctx.accessMap.applyDependentData(modelsMap);
 
-
       hl('after apply dep data', ctx.accessMap.accessMap);
     }
 
-    let doc = clone(result.result);
     ctx.accessMap.buildRuleSetQueries();
-    // Cache query results
-    let testedQueries = {};
 
-    // TODO: merge with postReadAllACL
+    // TODO: We need to put data formatting at last step
+    let data = [result.result];
 
-    for (let prop of Object.keys(ctx.accessMap.accessMap)) {
-      let val = ctx.accessMap.accessMap[prop];
+    let resultData = this.applyAccessMapToData(ctx.accessMap, data);
 
-      debug('accessMap val %j', val);
-      let allow;
+    debug('resultData', resultData);
 
-      if (typeof(val) ==='boolean') {
-        allow = val;
-      } else {
-        debug('not boolean value');
-        let query = val.query;
-
-        hl('query', val.query);
-        // Apply query on object
-        // TODO: we don't need md5
-        let queryId = md5(JSON.stringify(query));
-        // Check for cached result
-        if (testedQueries[queryId] !== undefined) {
-          allow = testedQueries[queryId];
-          debug('extract allow from cache', allow);
-        } else {
-          debug('need to apply query %j', query);
-          debug('to data', [doc]);
-          // Apply query
-          // TODO: probably, we should put data formatting in the last middleware
-          // TODO: and not access node here
-          let queryResult = sift(query, [doc]);
-
-          if (queryResult.length) {
-            hl('query matched doc');
-            allow = true;
-          } else {
-            hl('query does not match the doc');
-            allow = false;
-          }
-          testedQueries[queryId] = allow;
-        }
-      }
-
-      if (!allow) {
-
-        // FIXME: quick workaround
-        if (prop == 'id') {
-          doc['_id'] = null;
-          continue;
-        }
-
-        // TODO: probably, we should put data formatting in the last middleware
-        // TODO: and not access node here
-        // TODO: should we actually remove property completely with delete
-        // TODO: we currently operate with mongoose objects
-        // TODO: should we ever convert it to plain objects
-        doc[prop] = null;
-      }
-
-      debug('doc iteration result', doc);
-
-      result.result = doc;
-    }
+    result.result = resultData[0] || null;
 
     next();
   }
@@ -933,7 +1219,7 @@ export default class Model {
     }
 
     // Skip for empty result
-    if (!result.result && !result.result.edges && !result.result.edges.length) {
+    if (!result.result || !result.result.edges || !result.result.edges.length) {
       debug('no result - skip');
       return next();
     }
@@ -1141,6 +1427,8 @@ export default class Model {
    * Based on action, roles and ACL rules returns map of allowed fields to access
    *
    * This method is currently used only for Create, delete, update actions and will be replaced
+   *
+   * @deprecated
    *
    * @param action
    * @param roles
@@ -1364,7 +1652,7 @@ export default class Model {
    */
   getCreateChain() {
     return [
-      this.handleACL,
+      this.handleCreateACL,
       this.validate,
       this.beforeCreate,
       this.processCreate,
@@ -1443,7 +1731,7 @@ export default class Model {
    * @param ctx
    */
   async mutateAndGetPayloadCreate(opts, input, ctx) {
-    opts.action = ACTION_CREATE;
+    opts.action = 'create';
     debug('mutateAndGetPayloadCreate');
     return await this.processChain(this.getCreateChain(), ...arguments);
   }
@@ -1457,7 +1745,7 @@ export default class Model {
    * @returns {*}
    */
   async mutateAndGetPayloadUpdate(opts, input, ctx) {
-    opts.action = ACTION_UPDATE;
+    opts.action = 'update';
     debug('mutateAndGetPayload - update', opts, input);
     return await this.processChain(this.getUpdateChain(), ...arguments);
   }
@@ -1470,7 +1758,7 @@ export default class Model {
    * @param ctx
    */
   async mutateAndGetPayloadRemove(opts, input, ctx) {
-    opts.action = ACTION_REMOVE;
+    opts.action = 'remove';
     debug('mutateAndGetPayload - remove', opts, input);
     return await this.processChain(this.getRemoveChain(), ...arguments);
   }
