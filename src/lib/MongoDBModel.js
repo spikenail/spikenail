@@ -126,7 +126,7 @@ export default class MongoDBModel extends Model {
       input.userId = ctx.currentUser._id;
     }
 
-    let item = await this.model.create(input);
+    let item = await this.model.create(this.extractInputKeys(input));
 
     debug('processCreate item', item);
 

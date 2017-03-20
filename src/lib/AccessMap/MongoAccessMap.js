@@ -329,7 +329,8 @@ export default class MongoAccessMap {
 
         // Ability to specify for which action we are checking access relation
         if (rule.checkAction) {
-          opts.action = rule.checkAction
+          opts.action = rule.checkAction;
+          opts.properties = null; // override properties
         }
 
         let depAccessMap = new MongoAccessMap(
@@ -345,22 +346,10 @@ export default class MongoAccessMap {
         // Currently, check for at least one true value for given roles of course
         if (depAccessMap.hasAtLeastOneTrueValue()) {
           hl('dependent map has true value');
-          // allow all
-          applyValue = {
-            allow: true,
-            fields: ['*'],
-            roles: ['*'], // roles make no sense in built map???
-            actions: [this.options.action]
-          }
+          applyValue = true;
         } else if (depAccessMap.isFails()) {
           hl('dependent map fails');
-          // build query
-          applyValue = {
-            allow: false,
-            fields: ['*'],
-            roles: ['*'],
-            actions: [this.options.action]
-          }
+          applyValue = false;
         } else {
           hl('dependent accessmap is not determined');
           // Unable to instantly determine an access based on static roles
@@ -470,7 +459,7 @@ export default class MongoAccessMap {
 
     for (let key of Object.keys(this.accessMap)) {
       let value = this.accessMap[key];
-      debug('iterating rule of accessMap', value);
+      debug('iterating rule of accessMap %j', value);
 
       if (typeof(value) === 'boolean') {
         debug('rule type is boolean - skip');

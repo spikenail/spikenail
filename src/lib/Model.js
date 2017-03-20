@@ -399,11 +399,14 @@ export default class Model {
       return;
     }
 
+    let input = this.extractInputKeys(_);
+    debug('data - after extracted keys', input);
+
     // Check if access map has dependent rules
     if (accessMap.hasDependentRules()) {
       debug('access map has dependent rules - fetch dep data');
       // Fetch dependent data and apply
-      let data = await this.fetchDataForDependentRules(accessMap, _);
+      let data = await this.fetchDataForDependentRules(accessMap, input);
       debug('fetched data', data);
       accessMap.applyDependentData(data);
       accessMap.buildRuleSetQueries();
@@ -431,9 +434,13 @@ export default class Model {
 
     // Apply query on input data to check
 
-    debug('query', query, 'data', [_]);
+    debug('query', query, 'data', [input]);
 
-    if (!(sift(query, [_])).length) {
+    let siftResult = sift(query, [input, { boardId: 'test'} ]);
+
+    debug('siftResult', siftResult);
+
+    if (!siftResult.length) {
       debug('sift - false');
       result.errors = [{
         message: 'Access denied',
@@ -445,6 +452,26 @@ export default class Model {
 
     debug('all nice - continue');
     next();
+  }
+
+  /**
+   * Input data will have global id but we can only work internally with database id
+   */
+  extractInputKeys(data) {
+    debug('extract input keys');
+
+    let input = clone(data);
+
+    for (let key of Object.keys(input)) {
+      let prop = this.schema.properties[key];
+
+      if (prop.type == 'id') {
+        input[key] = fromGlobalId(input[key]).id;
+      }
+    }
+
+    debug('input with extracted keys', input);
+    return input;
   }
 
   /**
