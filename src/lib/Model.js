@@ -284,18 +284,6 @@ export default class Model {
    * @returns {{result: {id: *}}}
    */
   async processUpdate(result, next, opts, input, ctx) {
-    debug('currentUser', ctx.currentUser);
-
-    // Unpack document id from global id
-    const id = fromGlobalId(input.id).id;
-    delete input.id;
-
-    // Update with no document returned. As we probably will request it later
-    await this.model.findByIdAndUpdate(id, { $set: input }, { new: true });
-
-    // TODO: we need to return id only if doc is actually updated (?)
-    result.result = { id };
-
     next();
   }
 
@@ -373,7 +361,6 @@ export default class Model {
     next();
   }
 
-
   /**
    * Handle create ACL
    *
@@ -436,7 +423,7 @@ export default class Model {
 
     debug('query', query, 'data', [input]);
 
-    let siftResult = sift(query, [input, { boardId: 'test'} ]);
+    let siftResult = sift(query, [input]);
 
     debug('siftResult', siftResult);
 
@@ -451,6 +438,222 @@ export default class Model {
     }
 
     debug('all nice - continue');
+    next();
+  }
+
+  /**
+   * Handle update ACL
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<*>}
+   */
+  async handleUpdateACL(result, next, options, _, args, ctx) {
+
+    debug('handle Update ACL _', _, result);
+
+    let accessMap = new MongoAccessMap(this, ctx, { action: options.action, properties: Object.keys(_) });
+    await accessMap.init();
+
+    debug('access map initialized');
+
+    ctx.accessMap = accessMap;
+
+    // If access map has at least one strict false value we throw 403 error
+    // We can't just trim this value and save all other, as it might lead to misunderstanding
+    if (accessMap.hasAtLeastOneFalseValue()) {
+
+      debug('access map has at least one false');
+
+      result.errors = [{
+        message: 'Access denied',
+        code: '403'
+      }];
+
+      return;
+    }
+
+    debug('check if passing');
+
+    if (accessMap.isPassing()) {
+      debug('access map is passing');
+      return next();
+    }
+
+    let id = fromGlobalId(_.id).id;
+
+    debug('input', id);
+
+    let input = this.extractInputKeys(_);
+
+    debug('input with extracted keys', input);
+
+    // We need fetch the document anyway
+    // TODO: we need to cache this with data loader in order to avoid race-condition issues
+    // TODO: and not to fetch same doc twice
+    let doc = await this.query.bind(this, {
+      method: 'findOne',
+      query: { _id: new mongoose.Types.ObjectId(id) }
+    }, _, args)();
+
+    if (!doc) {
+      debug('no document found');
+      //TODO: should we have explicit difference between not found and 403?
+      result.errors = [{
+        message: 'Access denied',
+        code: '403'
+      }];
+      return;
+    }
+
+    if (accessMap.hasDependentRules()) {
+      debug('access map has dependent rules');
+
+      let modelsMap = await this.fetchDataForDependentRules(accessMap, doc);
+
+      debug('apply dependent data');
+      accessMap.applyDependentData(modelsMap);
+
+      hl('after apply dep data', accessMap.accessMap);
+
+      if (accessMap.hasAtLeastOneFalseValue()) {
+        debug('access map has at least one false');
+        result.errors = [{
+          message: 'Access denied',
+          code: '403'
+        }];
+
+        return;
+      }
+
+      if (accessMap.isPassing()) {
+        debug('access map is passing');
+        return next();
+      }
+    }
+
+    let query = await accessMap.getQuery();
+    debug('query:', query);
+
+    let siftResult = sift(query, [doc]);
+    debug('first siftResult', siftResult);
+
+    if (!siftResult.length) {
+      debug('sift - false');
+      result.errors = [{
+        message: 'Access denied',
+        code: '403'
+      }];
+
+      return;
+    }
+
+    debug('first sift result is fine');
+
+    // In some cases we have to do and additional ACL check
+    // It is needed if we are changing foreign keys
+    // TODO: check that we even changing relations affected by dependent rules
+    if (accessMap.initialProps.hasDependentRules) {
+      debug('additional acl check is needed');
+      // Create access map only for dependent rules
+      // check one more time
+      let accessMap = new MongoAccessMap(this, ctx, {
+        action: options.action,
+        properties: Object.keys(_),
+        onlyDependentRules: true
+      });
+      await accessMap.init();
+
+      debug('access map with only dep rules', accessMap.accessMap);
+
+      let newDoc = Object.assign({}, doc.toObject(), input);
+      debug('newDoc', newDoc);
+
+      debug('before fetch data for dep rules');
+      // Apply dependent data based on input
+      let modelsMap = await this.fetchDataForDependentRules(accessMap, newDoc);
+
+      debug('apply dependent data on input', modelsMap);
+      accessMap.applyDependentData(modelsMap);
+      hl('after apply dep data on input', accessMap.accessMap);
+
+      if (accessMap.hasAtLeastOneFalseValue()) {
+        debug('second access map has at least one false');
+        result.errors = [{
+          message: 'Access denied',
+          code: '403'
+        }];
+
+        return;
+      }
+
+      if (accessMap.isPassing()) {
+        debug('second access map is passing');
+        return next();
+      }
+
+      let query = await accessMap.getQuery();
+      debug('second query:', query);
+
+      let siftResult = sift(query, [newDoc]);
+      debug('SECOND siftResult', siftResult);
+
+      if (!siftResult.length) {
+        debug('sift - false');
+        result.errors = [{
+          message: 'Access denied',
+          code: '403'
+        }];
+
+        return;
+      }
+    }
+
+    debug('all fine go next');
+
+    next();
+  }
+
+  /**
+   * Handle remove ACL
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async handleRemoveACL(result, next, options, _, args, ctx) {
+    let accessMap = new MongoAccessMap(this, ctx, { action: options.action, properties: Object.keys(_) });
+    await accessMap.init();
+
+    // If access map has at least one strict false value we throw 403 error
+    // We can't just trim this value and save all other, as it might lead to misunderstanding
+    if (accessMap.hasAtLeastOneTrueValue()) {
+      debug('has at least one true - success');
+      return next();
+    }
+
+    if (accessMap.isFails()) {
+      debug('access map fails');
+      result.errors = [{
+        message: 'Access denied',
+        code: '403'
+      }];
+
+      return;
+    }
+
+    debug('access map is not determined');
+
+    // TODO
+
     next();
   }
 
@@ -493,9 +696,6 @@ export default class Model {
   /**
    * Handle ACL for Create, Update, Delete actions
    *
-   *
-   * TODO: WIP
-   *
    * @param result
    * @param next
    * @param opts
@@ -503,8 +703,8 @@ export default class Model {
    * @param ctx
    * @returns {Promise.<void>}
    */
-  async handleUpdateACL(result, next, options, _, args, ctx) {
-    debug('handle CUDACL');
+  async _handleUpdateACL(result, next, options, _, args, ctx) {
+    debug('handle update ACL');
 
     // We need to get input here
 
@@ -1694,7 +1894,7 @@ export default class Model {
    */
   getUpdateChain() {
     return [
-      this.handleACL,
+      this.handleUpdateACL,
       this.validate,
       this.beforeUpdate,
       this.processUpdate,
@@ -1709,7 +1909,7 @@ export default class Model {
    */
   getRemoveChain() {
     return [
-      this.handleACL,
+      this.handleRemoveACL,
       this.validate,
       this.beforeRemove,
       this.processRemove,

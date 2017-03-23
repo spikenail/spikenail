@@ -141,19 +141,23 @@ export default class MongoDBModel extends Model {
    * @param result
    * @param next
    * @param opts
-   * @param input
+   * @param _
    * @param ctx
    * @returns {{result: {id: *}}}
    */
-  async processUpdate(result, next, opts, input, ctx) {
+  async processUpdate(result, next, opts, _, ctx) {
+    debug('processUpdate');
     debug('currentUser', ctx.currentUser);
 
-    // Unpack document id from global id
-    const id = fromGlobalId(input.id).id;
-    delete input.id;
+    let data = this.extractInputKeys(_);
+    let id = data.id;
+    delete data.id;
+
+    debug('data', data);
+    debug('id', id);
 
     // Update with no document returned. As we probably will request it later
-    await this.model.findByIdAndUpdate(id, { $set: input }, { new: true });
+    await this.model.findByIdAndUpdate(id, { $set: data }, { new: true });
 
     // TODO: we need to return id only if doc is actually updated (?)
     result.result = { id };

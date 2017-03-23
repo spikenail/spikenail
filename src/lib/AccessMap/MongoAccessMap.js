@@ -139,6 +139,13 @@ export default class MongoAccessMap {
     hl('acls after injection %j', this.sourceACLs, this.sourceACLs);
 
     // Filter model acls according to specified options
+    if (this.options.onlyDependentRules) {
+      debug('only dependent rules');
+      this.acls = this.sourceACLs.filter(rule => {
+        return this.isDeferredRule(rule);
+      })
+    }
+
     // TODO: remove ctx from arguments - it is possible to access it by this.ctx
     this.acls = this.sourceACLs
       .filter(this.isRuleMatchAction(this.options.action)) // TODO: defaults? throw error?
@@ -306,7 +313,9 @@ export default class MongoAccessMap {
 
     // Initialize the access map of properties
     let accessMap = {};
-    Object.keys(this.model.schema.properties).forEach(field => {
+
+    let initialProps = this.options.properties || Object.keys(this.model.schema.properties);
+    initialProps.forEach(field => {
       // By default, everything is allowed
       accessMap[field] = true;
     });
@@ -330,7 +339,8 @@ export default class MongoAccessMap {
         // Ability to specify for which action we are checking access relation
         if (rule.checkAction) {
           opts.action = rule.checkAction;
-          opts.properties = null; // override properties
+          opts.properties = null;
+          opts.onlyDependentRules = null;
         }
 
         let depAccessMap = new MongoAccessMap(
