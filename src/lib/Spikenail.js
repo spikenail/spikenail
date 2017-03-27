@@ -510,8 +510,8 @@ class Spikenail extends EventEmitter {
 
     let fields = {};
 
-    for (let prop of Object.keys(schema.properties)) {
-      let field = schema.properties[prop];
+    for (let prop of Object.keys(schema.publicProperties)) {
+      let field = schema.publicProperties[prop];
 
       // Handle relation
       if (field.relation) {
@@ -622,8 +622,8 @@ class Spikenail extends EventEmitter {
   schemaToMutationFields(schema) {
     let fields = {};
 
-    for (let prop of Object.keys(schema.properties)) {
-      let field = schema.properties[prop];
+    for (let prop of Object.keys(schema.publicProperties)) {
+      let field = schema.publicProperties[prop];
 
       // Skip relations for now
       if (field.relation) {

@@ -117,7 +117,7 @@ export default class MongoDBModel extends Model {
     debug('processCreate', input);
 
     // Substitute current userId if not specified and if possible
-    if (!input.userId && ctx.currentUser && ctx.currentUser._id && this.schema.properties.userId) {
+    if (!input.userId && ctx.currentUser && ctx.currentUser._id && this.publicProperties.userId) {
       debug('need to substitute current userId');
       // It worth noting that editing of userId should be restricted - otherwise transfer will be possible
       // If necessary - on validation step we have to specify userId as not null

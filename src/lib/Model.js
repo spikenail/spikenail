@@ -115,6 +115,21 @@ export default class Model {
         return;
       }
 
+      // lets create 2 properties
+      this.properties = schema.properties;
+      this.publicProperties = {};
+      this.schema.publicProperties = this.publicProperties;
+
+      Object.keys(this.properties).forEach(prop => {
+        if (this.properties[prop].private) {
+          return;
+        }
+
+        this.publicProperties[prop] = this.properties[prop];
+      });
+
+      debug('public properties', this.publicProperties);
+
       // Expose model
       this.model = this.createAdapterModel(schema);
     } catch(err) {
@@ -721,7 +736,7 @@ export default class Model {
     let input = clone(data);
 
     for (let key of Object.keys(input)) {
-      let prop = this.schema.properties[key];
+      let prop = this.publicProperties[key];
 
       if (prop.type == 'id') {
         input[key] = fromGlobalId(input[key]).id;
@@ -1092,7 +1107,7 @@ export default class Model {
 
       modelsMap[modelName] = {
         model: model,
-        foreignKey: this.schema.properties[modelName].foreignKey,
+        foreignKey: this.publicProperties[modelName].foreignKey,
         ids: new Set()
       }
     }
@@ -1328,7 +1343,7 @@ export default class Model {
 
         modelsMap[modelName] = {
           model: model,
-          foreignKey: this.schema.properties[modelName].foreignKey,
+          foreignKey: this.publicProperties[modelName].foreignKey,
           ids: new Set()
         }
       }
