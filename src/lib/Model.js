@@ -748,53 +748,6 @@ export default class Model {
   }
 
   /**
-   * Handle ACL
-   *
-   * @deprecated
-   *
-   * @param result
-   * @param next
-   * @param opts
-   * @param input
-   * @param ctx
-   */
-  async handleACL(result, next, opts, input, ctx) {
-    debug('handleACL', result, opts, input);
-
-    if (!this.schema.acls || !this.schema.acls.length) {
-      debug('no acls defined');
-      return next();
-    }
-
-    // In order to avoid unnecessary roles checking
-    // Extract possible roles from ACL rules
-    let possibleRoles = this.getPossibleRoles(this.schema.acls);
-    debug('possibleRoles', possibleRoles);
-
-    let roles = await this.getRoles(possibleRoles, opts, input, ctx);
-    debug('roles', roles);
-
-    let accessMap = this.createAccesMap(opts, input, roles, this.schema.acls);
-
-    debug('accessMap', accessMap);
-
-    // TODO: it is only crud acl, in fetch case logic could change
-    let access = Object.keys(accessMap).every(key => accessMap[key]);
-    debug('result', result);
-
-    // If everything is fine — continue
-    if (access) {
-      return next();
-    }
-
-    // else show an error?
-    result.errors = [{
-      message: 'Access denied',
-      code: '403'
-    }];
-  }
-
-  /**
    * Handles READ acl and applies scope conditions if needed
    *
    * @param result
@@ -1541,80 +1494,6 @@ export default class Model {
    */
   getDynamicRoleNames(ctx) {
     return Object.keys(this.getDynamicRoles(ctx));
-  }
-
-  /**
-   * Based on action, roles and ACL rules returns map of allowed fields to access
-   *
-   * This method is currently used only for Create, delete, update actions and will be replaced
-   *
-   * @deprecated
-   *
-   * @param action
-   * @param roles
-   * @param rules
-   */
-  createAccessMap(opts, input, roles, rules) {
-    let action = opts.action;
-    debug('createAccessMap', action, roles, rules, input, opts);
-
-    // Everything is acceptable by default
-    let accessMap = {};
-    Object.keys(input).forEach(field => {
-      accessMap[field] = true;
-    });
-
-    for (let rule of this.schema.acls) {
-      debug('iterating rules', rule);
-
-      if (!rule.actions || !rule.roles || rule.allow === undefined) {
-        debug('invalid rule', rule);
-        throw new Error('Invalid rule');
-      }
-
-      if (!Array.isArray(rule.actions)) {
-        rule.actions = [rule.actions];
-      }
-
-      // Filter rule by action
-      if (!~rule.actions.indexOf('*') && !~rule.actions.indexOf(opts.action)) {
-        debug('rule does not apply to action - skip', opts.actions);
-        continue;
-      }
-
-      // Filter rule by role
-      // Check if rule does not match current role
-      debug('checking role matching');
-      if (!~rule.roles.indexOf('*') && !rule.roles.filter(r => ~roles.indexOf(r)).length) {
-        debug('rule does not apply to the roles');
-        continue;
-      }
-
-      // Wildcard
-      debug('check wildcard, property matching');
-      if (!rule.properties || ~rule.properties.indexOf('*')) {
-        debug('No rule properties specified or wildcard');
-
-        Object.keys(input).forEach(field => {
-          accessMap[field] = rule.allow;
-        });
-
-        continue;
-      }
-
-      debug('role properties iteration');
-
-      // TODO: we should not exclude any of fields from accessMap
-      // TODO: and then not check that all fields are true
-      // TODO: but compare with input
-      for (let property of rule.properties) {
-        if (~Object.keys(input).indexOf(property)) {
-          accessMap[property] = rule.allow;
-        }
-      }
-    }
-
-    return accessMap;
   }
 
   /**
