@@ -432,7 +432,7 @@ class Spikenail extends EventEmitter {
       config.outputFields.removedId = {
         type: GraphQLString,
         resolve: ({ result }) => {
-          return result.id;
+          return result ? result.id : null
         }
       };
 

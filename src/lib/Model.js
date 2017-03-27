@@ -314,22 +314,7 @@ export default class Model {
    * @returns {{result: {id: *}}}
    */
   async processRemove(result, next, opts, input, ctx) {
-    // TODO: support just hiding items
-    //if (!input.id) {
-    //  debug('no id specified');
-    //  return {};
-    //}
-
-    const id = fromGlobalId(input.id).id;
-    //let removeResult = await this.model.findOne({ id }).remove().exec();
-
-    let removeResult = await this.model.findOneAndRemove({ _id: id });
-
-    debug('removeResult', removeResult);
-
-    // Return original id
-    // FIXME: do not return id if nothing were removed
-    result.result = { id: input.id };
+    next();
   }
 
   /**
@@ -652,7 +637,77 @@ export default class Model {
 
     debug('access map is not determined');
 
-    // TODO
+    // TODO: almost copypaste of update ACL
+
+    let id = fromGlobalId(_.id).id;
+
+    debug('input', id);
+
+    let input = this.extractInputKeys(_);
+
+    debug('input with extracted keys', input);
+
+    // We need fetch the document anyway
+    // TODO: we need to cache this with data loader in order to avoid race-condition issues
+    // TODO: and not to fetch same doc twice
+    let doc = await this.query.bind(this, {
+      method: 'findOne',
+      query: { _id: new mongoose.Types.ObjectId(id) }
+    }, _, args)();
+
+    if (!doc) {
+      debug('no document found');
+      //TODO: should we have explicit difference between not found and 403?
+      result.errors = [{
+        message: 'Access denied',
+        code: '403'
+      }];
+      return;
+    }
+
+    if (accessMap.hasDependentRules()) {
+      debug('access map has dependent rules');
+
+      let modelsMap = await this.fetchDataForDependentRules(accessMap, doc);
+
+      debug('apply dependent data');
+      accessMap.applyDependentData(modelsMap);
+
+      hl('after apply dep data', accessMap.accessMap);
+
+      if (accessMap.hasAtLeastOneTrueValue()) {
+        debug('has at least one true - success');
+        return next();
+      }
+
+      if (accessMap.isFails()) {
+        debug('access map fails');
+        result.errors = [{
+          message: 'Access denied',
+          code: '403'
+        }];
+
+        return;
+      }
+    }
+
+    let query = await accessMap.getQuery();
+    debug('query:', query);
+
+    let siftResult = sift(query, [doc]);
+    debug('first siftResult', siftResult);
+
+    if (!siftResult.length) {
+      debug('sift - false');
+      result.errors = [{
+        message: 'Access denied',
+        code: '403'
+      }];
+
+      return;
+    }
+
+    debug('all is fine');
 
     next();
   }
@@ -690,168 +745,6 @@ export default class Model {
         rule.properties = ['*'];
       }
     }
-  }
-
-
-  /**
-   * Handle ACL for Create, Update, Delete actions
-   *
-   * @param result
-   * @param next
-   * @param opts
-   * @param input
-   * @param ctx
-   * @returns {Promise.<void>}
-   */
-  async _handleUpdateACL(result, next, options, _, args, ctx) {
-    debug('handle update ACL');
-
-    // We need to get input here
-
-    debug('result', result);
-    debug('_', _);
-    debug('args', args);
-
-    return;
-
-    let accessMap = new MongoAccessMap(this, ctx, { action: opts.action, properties: Object.keys(_) });
-    await accessMap.init();
-    ctx.accessMap = accessMap;
-
-    debug('acl map initialized');
-
-    if (accessMap.isFails()) {
-      debug('Access map fails');
-      result.errors = [{
-        message: 'Access denied',
-        code: '403'
-      }];
-
-      return;
-    }
-
-    // if (!accessMap.hasAtLeastOneTrueValue() && accessMap.hasDependentRules()) {
-    //
-    //   // we need to query it
-    //
-    //   debug('skip ACL check because of dep rules - it will be handled later');
-    //   // because of dependent rules we need to fetch this doc anyway to know parent id
-    //   // the acl will be handled in postACL method
-    //   return next();
-    // } else {
-    //
-    //   // build query if possible
-    //
-    //
-    //
-    // }
-
-    // If no dep docs and
-    // !accessMap.hasDependentRules()  !accessMap.hasAtLeastOneTrueValue()
-    if (true) {
-      debug('need to build query before processing');
-
-      // Build query if possible and needed
-      let query = await accessMap.getQuery();
-      // no need to assign i guess
-      // Apply query
-      options.query = Object.assign(options.query || {}, query);
-
-    } else {
-
-    }
-
-    // Fetch document
-
-    // TODO: lets handle it here for now:
-    debug('fetching the document');
-    options.method = 'findOne';
-
-    if (!options.query) {
-      options.query = {};
-    }
-    // TODO: don't actually remember why we have to select options.id or args.id
-    Object.assign(options.query, { _id: new mongoose.Types.ObjectId(options.id || args.id) });
-
-    // Try to fetch the doc
-    // TODO: we need to cache this with data loader in order to avoid race-condition issues
-    // TODO: and not to fetch same doc twice
-    let doc = await this.query.bind(this, options, _, args)();
-
-    // if nothing found
-    // TODO: should we have explicit difference between not found and 403?
-
-    debug('fetched result', doc);
-
-    if (!doc) {
-      debug('No fetched document - means it not found with given conditions');
-      result.errors = [{
-        message: 'Access denied',
-        code: '403'
-      }];
-
-      return;
-    }
-
-    // Lets handle dependencies
-    if (ctx.accessMap.initialProps.hasDependentRules) {
-      hl('accessMap has dependent rules and not able to skip values');
-
-      let modelsMap = await this.fetchDataForDependentRules(ctx.accessMap, fetched);
-
-      debug('apply dependent data');
-      ctx.accessMap.applyDependentData(modelsMap);
-
-      hl('after apply dep data', ctx.accessMap.accessMap);
-    }
-
-    // TODO: this step is not obvious
-    ctx.accessMap.buildRuleSetQueries();
-
-    let resultData = this.applyAccessMapToData(ctx.accessMap, [doc]);
-
-    debug('resultData', resultData);
-
-    //result.result = resultData[0] || null;
-
-    // now need to decide
-    // should we abort or process
-
-    if (!resultData || !resultData.length) {
-
-    }
-
-    // apply query if  exists
-
-    // Compile access map to single query
-
-    // We don't need apply query if no documents can be skipped
-    // if (accessMap.hasAtLeastOneTrueValue()) {
-    //   debug('Not need to apply query - no documents might be skipped');
-    //   return next();
-    // }
-    //
-    // debug('need to apply query');
-    //
-    // // Try to build query as we possibly need it
-    // let query = await accessMap.getQuery();
-    //
-    // if (!query) {
-    //   debug('No query was produced');
-    //   return next();
-    // }
-    //
-    // debug('applying query', query);
-    //
-    //
-    //
-    // debug('applied query', options.query);
-    //
-    // debug('access map is OK');
-
-    next();
-
-
   }
 
   /**
