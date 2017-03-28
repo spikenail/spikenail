@@ -73,7 +73,6 @@ class Spikenail extends EventEmitter {
 
       // Load models
       this.models = await this.loadModels();
-      this.initializeModels();
 
       // Generate and expose graphql schema
       if (Object.keys(this.models).length) {
@@ -106,17 +105,6 @@ class Spikenail extends EventEmitter {
       });
     } catch (err) {
       console.error(err);
-    }
-  }
-
-  /**
-   * Set some defaults check for validity etc
-   */
-  initializeModels() {
-    debug('initialize models');
-    for (let modelName of Object.keys(this.models)) {
-      // TODO: need to also validate ACLs and throw error if something wrong
-      this.models[modelName].initializeACLs();
     }
   }
 

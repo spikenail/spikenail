@@ -4,6 +4,8 @@ const hl = require('debug')('hl');
 const clone = require('lodash.clone');
 const isPlainObject = require('lodash.isplainobject');
 
+import pluralize from 'pluralize';
+
 const md5 = require('md5');
 
 const sift = require('sift');
@@ -114,6 +116,9 @@ export default class Model {
         console.log('Warning - no schema properties');
         return;
       }
+
+      this.initializeProperties();
+      this.initializeACLs();
 
       // lets create 2 properties
       this.properties = schema.properties;
@@ -749,6 +754,8 @@ export default class Model {
 
   /**
    * Set ACL defaults etc
+   *
+   * TODO: guess should be invoked by constructor and not by Spikenail
    */
   initializeACLs() {
     if (!this.schema.acls) {
@@ -760,6 +767,58 @@ export default class Model {
         rule.properties = ['*'];
       }
     }
+  }
+
+  /**
+   * Set properties defaults. Convert to usable form
+   *
+   *  TODO: throw warnings and errors for properties defined incorrectly
+   */
+  initializeProperties() {
+
+    debug('initizalize properties');
+
+    let possibleRelations = ['belongsTo', 'hasMany'];
+
+    if (!this.schema.properties) {
+      return;
+    }
+
+    Object.keys(this.schema.properties).forEach(key => {
+      let prop = this.schema.properties[key];
+
+      // Extract relations
+      if (prop.relation) {
+        if (!~possibleRelations.indexOf(prop.relation)) {
+          throw new Error(`Relation "${prop.relation}" is not exists`);
+        }
+
+        // Set defaults for ref
+        if (!prop.ref) {
+          if (prop.relation === "belongsTo") {
+            prop.ref = key;
+          }
+
+          if (prop.relation === "hasMany") {
+            // singularize, e.g. has many lists, ref to model list
+            prop.ref = pluralize.singular(key);
+          }
+        }
+
+        if (!prop.foreignKey) {
+          if (prop.relation === "belongsTo") {
+            prop.foreignKey = key + 'Id';
+          }
+
+          if (prop.relation === "hasMany") {
+            prop.foreignKey = this.getName() + 'Id';
+          }
+        }
+
+        debug('Prop with defaults', prop);
+      }
+    });
+
   }
 
   /**
