@@ -754,10 +754,12 @@ export default class Model {
 
   /**
    * Set ACL defaults etc
-   *
-   * TODO: guess should be invoked by constructor and not by Spikenail
+   * TODO: add validations
    */
   initializeACLs() {
+
+    debug('initialize ACLs for', this.getName());
+
     if (!this.schema.acls) {
       return;
     }
@@ -765,7 +767,36 @@ export default class Model {
     for (let rule of this.schema.acls) {
       if (!rule.properties) {
         rule.properties = ['*'];
+      } else {
+        if (!Array.isArray(rule.properties)) {
+          rule.properties = [rule.properties];
+        }
+        // TODO: if * exists remove all other properties
       }
+
+      if (!rule.roles) {
+        rule.roles = ['*'];
+      } else {
+        if (!Array.isArray(rule.roles)) {
+          rule.roles = [rule.roles];
+        }
+        // TODO: if * exists remove all other roles
+      }
+
+      if (!rule.actions) {
+        rule.actions = ['*']
+      } else {
+        if (!Array.isArray(rule.actions)) {
+          rule.actions = [rule.actions];
+        }
+        // TODO: if * exists remove all other actions
+      }
+
+      if (rule.scope && typeof rule.scope !== "function") {
+        rule.scope = function() { return rule.scope };
+      }
+
+      debug('Rule with defaults', rule);
     }
   }
 
