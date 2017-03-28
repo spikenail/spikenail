@@ -318,7 +318,185 @@ Spikenail is based on koa2.
 
 ## ACL
 
-### Dynamic and static roles
+### Introduction
+
+```
+acls: [{
+    allow: false,
+    roles: ['*'],
+    actions: ['*']
+}, {
+    allow: true,
+    roles: ['*'],
+    actions: ['*'],
+    scope: function() {
+        return { isPublic: true }
+    }
+}
+```
+
+ACL rules are specified under `acls` property of model schema
+Rules applies one by one the in natural order priority.
+
+Rules notation could be simplified and above rules might be written as
+
+```
+
+```
+
+### Rule structure
+
+#### allow
+
+Each rule must have `allow` property defined. Allow is boolean value
+that indicates if rule allows something or disallows.
+
+Example:
+```
+allow: true
+```
+
+#### properties (optional)
+`properties` is an array of properties of model that rule should apply to.
+Omit or use * sign to apply to all rules
+
+#### actions (optional)
+
+Specify what actions rule should be applied to
+There are 4 types of actions:2
+
+* create
+* update
+* remove
+* read
+
+Omit this property or use * sign to apply to all actions
+
+Example:
+
+```
+properties: ['create', 'update']
+```
+
+#### scope
+
+Scope is a mongodb condition. If document match a scope only then rule will be applied.
+
+e.g. `{ isPublic: true }`
+The rule will be applied only to documents that have `isPublic` property equals `true`
+
+Scope might be defined as function
+
+`
+scope: function(ctx) {
+        return { isPublic: true }
+}
+`
+
+This way it will have access to ctx
+
+#### roles
+
+`roles` is an array of roles that rules apply to.
+
+Example
+
+```
+roles: ["anonymous", "member"]
+```
+
+Roles might be static or dynamic
+
+##### Static roles
+
+Static roles is the roles that not depends on particular document or dataset.
+They calculated once per request for current user.
+
+Built-in roles are
+
+* anonymous
+* user
+
+###### Adding your own static roles
+
+Override getStaticRoles function of the model
+
+##### Dynamic roles
+
+Dynamic roles are calculated for each particular document.
+For example role `owner` means that `currentUser.id === fetchedDocument.id`
+
+Built-in roles are
+
+* owner
+
+###### Defining dynamic roles
+
+Dynamic roles are defined using `roles` object of model schema
+
+For example we want to share some object with other users,
+and put their username into `members` array of the document.
+
+Then we can define role `member` in model schema:
+
+```
+roles: {
+     member: {
+       cond: function(ctx) {
+         return { "members.userId": ctx.currentUser }
+       }
+     }
+   }
+```
+
+In roles property of acl rule:
+
+```
+roles: ['member']
+```
+
+
+#### Access based on another model
+
+In some cases we want to apply rule only if another model satisfies the condition
+There are two ways to do this:
+
+##### checkRelation
+
+Example:
+
+`Article.js` model has defined belongsTo relation
+
+```
+blog: {
+    relation: "belongsTo"
+}
+```
+
+We want allow for `user` to only read a article only if he can read the blog article belongs to:
+```
+acls: [{
+    allow: false
+}, {
+    allow: true,
+    roles: ["user"],
+    actions: ["read"],
+    checkRelation: "blog"
+    checkAction: "read"
+}]
+```
+
+checkAction is an optional property. It will match current invoked action by default.
+
+##### test
+
+```
+test: "blog"
+```
+
+The access rules for the model will completely depends on rules for the relation `blog`.
+If role X can do action Y on blog, same role can do same action on current model.
+
 
 ## License
 
