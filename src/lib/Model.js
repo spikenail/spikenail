@@ -1586,11 +1586,96 @@ export default class Model {
     // Owner is predefined custom role
     let roles = {
       owner: {
-        cond: (ctx) => { userId: ctx.currentUser }
+        cond: function(ctx) {
+          if (!ctx.currentUser) {
+            return false;
+          }
+
+          return { userId: ctx.currentUser }
+        }
       }
     };
 
     return Object.assign(roles, this.schema.roles || {} );
+  }
+
+  /**
+   * Some dynamic roles might act as static roles
+   *
+   * TODO: incorrect method name - we are not calculated everything
+   *
+   * @param ctx
+   */
+  calculateDynamicRoles(ctx) {
+    debug('init dynamic roles');
+    if (!this.model.schema.roles) {
+      return {}
+    }
+
+    let roles = {};
+    Object.keys(this.model.schema.roles).forEach(roleName => {
+
+      let calculatedCond = this.model.schema.roles[roleName].cond(ctx);
+      if (typeof calculatedCond === 'boolean') {
+        roles[roleName] = calculatedCond;
+        return;
+      }
+
+      roles[roleName] = this.model.schema.roles[roleName];
+    });
+
+    debug('initialized dynamic roles');
+
+    return roles;
+  }
+
+  /**
+   * Return non false dynamic roles
+   *
+   * @param ctx
+   */
+  getPossibleDynamicRoles(ctx) {
+    let roles = this.calculateDynamicRoles(ctx);
+
+    let result = {};
+    Object.keys(roles).forEach(roleName => {
+      if (!roles[roleName]) {
+        return;
+      }
+
+      result[roleName] = roles[roleName];
+    });
+
+    return result;
+  }
+
+  /**
+   *
+   * @param ctx
+   * @returns {Array}
+   */
+  getPossibleDynamicRoleNames(ctx) {
+    return Object.keys(this.getPossibleDynamicRoles(ctx));
+  }
+
+  /**
+   * Get non boolean calculated dynamic roles
+   *
+   * @param ctx
+   */
+  getRealDynamicRoles(ctx) {
+    let roles = this.calculateDynamicRoles(ctx);
+
+    let result = {};
+    Object.keys(roles).forEach(roleName => {
+      if (typeof roles[roleName] === "boolean") {
+        return;
+      }
+
+      result[roleName] = roles[roleName];
+    });
+
+    return result;
   }
 
   /**

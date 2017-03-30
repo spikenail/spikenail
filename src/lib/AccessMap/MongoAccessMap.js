@@ -40,6 +40,8 @@ export default class MongoAccessMap {
 
     //let staticRoles = this.model.getStaticRoles(ctx);
     this.staticRoles = this.model.getStaticRoles(ctx);
+
+    this.dynamicRoles = this.model.getRealDynamicRoles(ctx);
   }
 
   /**
@@ -553,8 +555,18 @@ export default class MongoAccessMap {
         debug('found dynamic role definition:', role);
         // Execute handler
         // TODO: could it be async? On what data it depends? Should we execute it multiple times?
+        let calculatedCond = role.cond(ctx);
 
-        let cond = Object.assign(role.cond(ctx), query);
+        debug('calculated cond', calculatedCond);
+
+        if (typeof calculatedCond === "boolean") {
+          debug('condition calculated to boolean - skip');
+          // Not obvious but we skip boolean valued here, as it actually acts as static role
+          // and should've been handled before. We can't to anything with boolean at this step
+          continue;
+        }
+
+        let cond = Object.assign(calculatedCond, query);
         debug('calculated cond + query', cond);
         conds.push(cond);
       }
@@ -1181,8 +1193,8 @@ export default class MongoAccessMap {
 
     // Get dynamic roles for model from current model or related
     let dynamicRoles = this.isDependentRule(rule)
-      ? this.getDependentModel(rule).getDynamicRoleNames(ctx)
-      : this.model.getDynamicRoleNames(ctx);
+      ? this.getDependentModel(rule).getPossibleDynamicRoleNames(ctx)
+      : this.model.getPossibleDynamicRoleNames(ctx);
     debug('dynamicRoles', dynamicRoles);
 
     let roles = [];
@@ -1198,6 +1210,8 @@ export default class MongoAccessMap {
     roles = roles.concat(matchedDynamicRoles);
 
     // It is possible to manually specify roles for which we will build access map
+    // TODO: don't like it placed here. The function should only remove impossible roles
+    // TODO: and not do anything else
     if (this.options.roles && !~this.options.roles.indexOf('*')) {
       roles = this.options.roles;
     }
@@ -1259,7 +1273,23 @@ export default class MongoAccessMap {
    */
   isDeferredRule(rule) {
     // TODO: the purpose of this is not really clear. Change algorithm
-    return (rule.scope || (!~rule.roles.indexOf('*') && !this.isRuleMatchRoles(rule, this.staticRoles)))
+
+    if (rule.scope) {
+      return true;
+    }
+
+    // TODO: not sure it wasn't handled before
+    if (~rule.roles.indexOf('*')) {
+      return false;
+    }
+
+    if (this.isRuleMatchRoles(rule, Object.keys(this.dynamicRoles))) {
+      return true;
+    }
+
+    return false;
+
+    // return (rule.scope || (!~rule.roles.indexOf('*') && !this.isRuleMatchRoles(rule, this.staticRoles)))
   }
 
   /**
