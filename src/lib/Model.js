@@ -818,6 +818,12 @@ export default class Model {
     Object.keys(this.schema.properties).forEach(key => {
       let prop = this.schema.properties[key];
 
+      // Initialize foreignKeyFor
+      if (prop.type === 'id' && key !== 'id' && !prop.foreignKeyFor) {
+        // For ids that are not primary keys set foreignKeyFor
+        prop.foreignKeyFor = key.replace(/Id$/, '');
+      }
+
       // Extract relations
       if (prop.relation) {
         if (!~possibleRelations.indexOf(prop.relation)) {
@@ -1327,7 +1333,6 @@ export default class Model {
    */
   async postHandleReadOneACL(result, next, options, _, args, ctx) {
     hl('postHandleReadOneACL', ctx.accessMap);
-    hl('%j', ctx.accessMap.accessMap, ctx.accessMap.accessMap.id);
 
     debug('result', result);
 
