@@ -800,7 +800,11 @@ export default class Model {
       }
 
       if (rule.scope && typeof rule.scope !== "function") {
-        rule.scope = function() { return rule.scope };
+        // TODO: is it good way to go?
+        let scope = clone(rule.scope);
+        rule.scope = function() {
+          return scope;
+        }
       }
 
       debug('Rule with defaults', rule);
