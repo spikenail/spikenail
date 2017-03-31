@@ -10,6 +10,8 @@ const md5 = require('md5');
 
 const sift = require('sift');
 
+const path = require('path');
+
 import mongoose from 'mongoose';
 
 import Spikenail from './Spikenail';
@@ -109,6 +111,11 @@ export default class Model {
       this.schema = schema;
 
       // TODO: make name optional and pick the classname?
+
+      if (!this.schema.name) {
+        schema.name = this.constructor.name.toLowerCase();
+      }
+
       this.name = schema.name;
 
       // For now, we are supporting only mongodb
