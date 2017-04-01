@@ -921,6 +921,12 @@ export default class Model {
   async postHandleReadACL(result, next, options, _, args, ctx) {
     debug('postHandleReadACL');
 
+    // Handles ACL
+    if (!this.schema.acls || !this.schema.acls.length) {
+      debug('no acls defined');
+      return next();
+    }
+
     if (options.actionType == 'all') {
       return await this.postHandleReadAllACL(...arguments);
     }
