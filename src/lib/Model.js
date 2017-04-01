@@ -1043,7 +1043,12 @@ export default class Model {
     ctx.accessMap = accessMap;
 
     if (accessMap.isFails()) {
-      debug('access map fails - interrupt chain');
+      debug('hasmany - access map fails - interrupt chain');
+      // return empty result
+      // TODO: all this formatting stuff should not be here
+      result.result = {
+        edges: null
+      };
       return;
     }
 
@@ -1136,7 +1141,10 @@ export default class Model {
     ctx.accessMap = accessMap;
 
     if (accessMap.isFails()) {
-      debug('access map fails - interrupt chain');
+      debug('readall - access map fails - interrupt chain');
+      result.result = {
+        edges: null
+      };
       return;
     }
 
@@ -1568,8 +1576,37 @@ export default class Model {
       }
 
       debug('resulting doc', doc);
+      debug('resulting node', doc.node.toObject());
+
+      // check if doc is all null values document - return null then
+      let isAllNull = true;
+      let plainNode = doc.node.toObject();
+      for (let key of Object.keys(plainNode)) {
+        debug('null test key', key);
+
+        debug('access map val', ctx.accessMap.accessMap[key]);
+
+        if (ctx.accessMap.accessMap[key] === undefined) {
+          debug('key is not in access map');
+          continue;
+        }
+
+        if (plainNode[key] !== null) {
+          debug('key is not null');
+          isAllNull = false;
+          break;
+        }
+      }
+
+      if (isAllNull) {
+        debug('All null');
+        return null;
+      }
 
       return doc;
+    }).filter(doc => {
+      // remove null docs
+      return doc !== null
     });
 
     next();
