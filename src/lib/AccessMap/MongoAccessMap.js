@@ -26,7 +26,7 @@ export default class MongoAccessMap {
    * @param options
    */
   constructor(model, ctx, options = {}) {
-    debug('construct mongo access map', options);
+    debug(model.getName(), 'constructor', options);
 
     // TODO: filter by requested fields
 
@@ -50,99 +50,98 @@ export default class MongoAccessMap {
    * @returns {Promise.<void>}
    */
   async init() {
-    debug('initialize access map');
+    debug(this.model.getName(), 'initialize access map');
 
     // TODO: move this stuff on app initialization step
     // Handle rule injecting
-    debug('Handling injection of the rules');
-
-    let replaceMap = {};
-    for (let [index, rule] of this.sourceACLs.entries()) {
-      let model = this.getInjectRelationModel(rule);
-
-      if (!model) {
-        continue;
-      }
-
-      hl('Injection model found:', model.getName());
-
-      // Create access map for the
-      let opts = {};
-      if (rule.action) {
-        opts.action = rule.action;
-      }
-      let injectAccessMap = new MongoAccessMap(model, this.ctx, Object.assign(this.options, opts));
-      await injectAccessMap.init();
-
-      // TODO: we have to throw an error if it has dependent rules as we are likely to unable handle this case for now
-      // TODO: not sure about nested injection
-      if (injectAccessMap.hasAtLeastOneTrueValue()) {
-        hl('inject map has true value');
-        // allow all
-        replaceMap[index] = [{
-          allow: true,
-          fields: ['*'],
-          roles: ['*'],
-          actions: [this.options.action]
-        }]
-      } else if (injectAccessMap.isFails()) {
-        hl('inject map fails');
-        // build query
-        replaceMap[index] = [{
-          allow: false,
-          fields: ['*'],
-          roles: ['*'],
-          actions: [this.options.action]
-        }]
-      } else {
-        hl('accessmap is not determined');
-        // Unable to instantly determine an access based on static roles
-        // build query and use it as scope
-
-        // An issue - constructor is not async stuff
-        let query = await injectAccessMap.getQuery();
-        hl('inject query is %j', query);
-        // TODO: we could possibly pick up the query of _id/or lists field only
-        // TODO: means simplest query that will give us allow true value
-
-        // Synthetic rule where scope is query on dependent model
-        replaceMap[index] = [{
-          // Disallow everything by default
-          allow: false,
-          fields: ['*'],
-          roles: ['*'],
-          actions: [this.options.action]
-        }, {
-          // allow only in case we allow to access dependent relation
-          allow: true,
-          fields: ['*'],
-          roles: ['*'],
-          //test: 123,
-          scope: function () { return query },
-          actions: [this.options.action],
-          checkRelation: model.getName()
-        }]
-      }
-    }
-
-    debug('replaceMap', replaceMap);
-
-    for (let index of Object.keys(replaceMap)) {
-      let rules = replaceMap[index];
-
-      debug('replacing', rules);
-
-      // replace inject rule with rules
-      this.sourceACLs.splice(index, 1, ...rules);
-
-      debug('after splice');
-    }
-
-    hl('acls after injection %j', this.sourceACLs, this.sourceACLs);
+    // TODO: deprecate injection stuff for now as looks like it is not very useful
+    // let replaceMap = {};
+    // for (let [index, rule] of this.sourceACLs.entries()) {
+    //   let model = this.getInjectRelationModel(rule);
+    //
+    //   if (!model) {
+    //     continue;
+    //   }
+    //
+    //   hl('Injection model found:', model.getName());
+    //
+    //   // Create access map for the
+    //   let opts = {};
+    //   if (rule.action) {
+    //     opts.action = rule.action;
+    //   }
+    //   let injectAccessMap = new MongoAccessMap(model, this.ctx, Object.assign(this.options, opts));
+    //   await injectAccessMap.init();
+    //
+    //   // TODO: we have to throw an error if it has dependent rules as we are likely to unable handle this case for now
+    //   // TODO: not sure about nested injection
+    //   if (injectAccessMap.hasAtLeastOneTrueValue()) {
+    //     hl('inject map has true value');
+    //     // allow all
+    //     replaceMap[index] = [{
+    //       allow: true,
+    //       fields: ['*'],
+    //       roles: ['*'],
+    //       actions: [this.options.action]
+    //     }]
+    //   } else if (injectAccessMap.isFails()) {
+    //     hl('inject map fails');
+    //     // build query
+    //     replaceMap[index] = [{
+    //       allow: false,
+    //       fields: ['*'],
+    //       roles: ['*'],
+    //       actions: [this.options.action]
+    //     }]
+    //   } else {
+    //     hl('accessmap is not determined');
+    //     // Unable to instantly determine an access based on static roles
+    //     // build query and use it as scope
+    //
+    //     // An issue - constructor is not async stuff
+    //     let query = await injectAccessMap.getQuery();
+    //     hl('inject query is %j', query);
+    //     // TODO: we could possibly pick up the query of _id/or lists field only
+    //     // TODO: means simplest query that will give us allow true value
+    //
+    //     // Synthetic rule where scope is query on dependent model
+    //     replaceMap[index] = [{
+    //       // Disallow everything by default
+    //       allow: false,
+    //       fields: ['*'],
+    //       roles: ['*'],
+    //       actions: [this.options.action]
+    //     }, {
+    //       // allow only in case we allow to access dependent relation
+    //       allow: true,
+    //       fields: ['*'],
+    //       roles: ['*'],
+    //       //test: 123,
+    //       scope: function () { return query },
+    //       actions: [this.options.action],
+    //       checkRelation: model.getName()
+    //     }]
+    //   }
+    // }
+    //
+    // debug('replaceMap', replaceMap);
+    //
+    // for (let index of Object.keys(replaceMap)) {
+    //   let rules = replaceMap[index];
+    //
+    //   debug('replacing', rules);
+    //
+    //   // replace inject rule with rules
+    //   this.sourceACLs.splice(index, 1, ...rules);
+    //
+    //   debug('after splice');
+    // }
+    //
+    // hl('acls after injection %j', this.sourceACLs, this.sourceACLs);
 
     // Filter model acls according to specified options
     if (this.options.onlyDependentRules) {
-      debug('only dependent rules');
+      debug(this.model.getName(), 'access map is only for dependent rules');
       this.acls = this.sourceACLs.filter(rule => {
         return this.isDeferredRule(rule);
       })
@@ -235,7 +234,6 @@ export default class MongoAccessMap {
    * @returns {null}
    */
   getInjectRelationModel(rule) {
-    debug('getInjectRelationModel');
     let rel = this.getInjectRelation(rule);
 
     if (!rel) {
@@ -304,14 +302,13 @@ export default class MongoAccessMap {
    */
   async buildAccessMap(acls) {
 
-    debug('buildAccessMap. acls:', acls);
+    debug(this.model.getName(), 'buildAccessMap, acls:', acls);
 
     let ctx = this.ctx;
 
     // TODO: we should probably filter and prepare ACL rules in one method.
     // TODO: as it is not obvious that this method requires filtered ACLs
     // TODO: think later what name of the function and args are better
-    debug('Applying rules on props');
 
     // Initialize the access map of properties
     let accessMap = {};
@@ -322,15 +319,14 @@ export default class MongoAccessMap {
       accessMap[field] = true;
     });
 
-    debug('Iterating filtered ACLs');
     for (let [index, rule] of acls.entries()) {
-      debug('iterating rule', index, rule);
+      debug(this.model.getName(), 'processing rule: %o', rule);
 
       let applyValue = rule.allow;
 
       // First of all lets check if it is dependent rule and could be resolved in place
       if (this.isDependentRule(rule)) {
-        debug('rule is dependent - try to resolve');
+        debug(this.model.getName(), 'rule is dependent, try to resolve');
         let depModel = this.getDependentModel(rule);
 
         // Build access map for dependent model
@@ -355,21 +351,23 @@ export default class MongoAccessMap {
         );
         await depAccessMap.init();
 
+        debug(this.model.getName(), 'dependent access map initialized: %o', depAccessMap.accessMap);
+
         // Currently, check for at least one true value for given roles of course
         if (depAccessMap.hasAtLeastOneTrueValue()) {
-          hl('dependent map has true value');
+          debug(this.model.getName(), 'rule resolved to true (at least one true)');
           applyValue = true;
         } else if (depAccessMap.isFails()) {
-          hl('dependent map fails');
+          debug(this.model.getName(), 'rule resolved to false (all false)');
           applyValue = false;
         } else {
-          hl('dependent accessmap is not determined');
+          debug(this.model.getName(), 'can not resolve in place, build the query');
           // Unable to instantly determine an access based on static roles
           // build query and use it as scope
 
           // An issue - constructor is not async stuff
           let query = await depAccessMap.getQuery();
-          hl('dep query is %j', query);
+          debug(this.model.getName(), 'dependent map query is %j', query);
           // TODO: we could possibly pick up the query of _id/or lists field only
           // TODO: means simplest query that will give us allow true value
 
@@ -386,22 +384,19 @@ export default class MongoAccessMap {
           }
         }
       } else if (this.isDeferredRule(rule)) {
-        debug('rule is deferred');
+        debug(this.model.getName(), 'rule is deferred, will calculate it later');
         applyValue = clone(rule);
       }
 
-      debug('applyValue:', applyValue);
+      debug(this.model.getName(), 'resulting apply value: %o', applyValue);
 
       // Apply rule to specific properties of model
       for (let prop of rule.properties) {
-        debug('iterating rule properties', prop);
         if (prop === '*') {
           // Properties could be manually specified by user
           let props = this.options.properties || Object.keys(accessMap);
 
           for (let prop of props) {
-
-            debug('* iterate all - ', prop);
             // TODO: no time to think why we need all these clone statements
             accessMap[prop] = clone(this.getNewApplyValue(clone(accessMap[prop]), clone(applyValue)));
           }
@@ -413,7 +408,7 @@ export default class MongoAccessMap {
       }
     }
 
-    debug('--- resulting accessMap', accessMap);
+    debug(this.model.getName(), 'resulting accessMap', accessMap);
 
     return accessMap;
   }
@@ -425,36 +420,30 @@ export default class MongoAccessMap {
    * @param applyValue
    */
   getNewApplyValue(prevValue, applyValue) {
-    debug('getNewApplyValue', prevValue, applyValue);
     // Algorithm that applies value on access map property
 
     // If strict value just apply as is
-    if (typeof(applyValue) === "boolean") {
-      debug('strict boolean');
+    if (typeof(applyValue) === 'boolean') {
       return applyValue;
     }
 
     // If apply value if rule object
 
     // Check if previous value is boolean
-    if (typeof(prevValue) == "boolean") {
+    if (typeof(prevValue) === 'boolean') {
       // If previous value is boolean
       // Replace it with apply value only if it inverts allow value
       if (prevValue !== applyValue.allow) {
-        debug('prevValue is different from deferred value - set deferred');
         return {
           rules: [applyValue]
         }
       }
 
       // Otherwise return prev value
-      debug('deferred value does not override prev value - keep prev value');
       return prevValue;
     }
 
     // If prev value is object with rule set, just push additional rule
-    debug('append');
-
     prevValue.rules.push(applyValue);
 
     return prevValue;
@@ -467,14 +456,12 @@ export default class MongoAccessMap {
   buildRuleQueries() {
     let ctx = this.ctx;
 
-    debug('buildRuleQueries');
+    debug(this.model.getName(), 'building rule queries');
 
     for (let key of Object.keys(this.accessMap)) {
       let value = this.accessMap[key];
-      debug('iterating rule of accessMap %j', value);
 
       if (typeof(value) === 'boolean') {
-        debug('rule type is boolean - skip');
         continue;
       }
 
@@ -497,7 +484,7 @@ export default class MongoAccessMap {
       // queries[hash] = queryVal;
     }
 
-    debug('map with builtRuleQueries %j', this.accessMap);
+    debug(this.model.getName(), 'map with rule queries %j', this.accessMap);
 
     this.built.ruleQueries = true;
   }
@@ -508,8 +495,6 @@ export default class MongoAccessMap {
    * @param sourceValue
    */
   createRuleQueriesForMapValue(sourceValue) {
-    debug('createRuleQueriesForMapValue', sourceValue);
-
     let ctx = this.ctx;
 
     let value = clone(sourceValue);
@@ -521,19 +506,15 @@ export default class MongoAccessMap {
 
     for (let rule of value.rules) {
       let model = this.isDependentRule(rule) ? this.getDependentModel(rule) : this.model;
-      debug('building queries set');
 
       let query = {};
 
       if (rule.scope) {
-        debug('scope exists', rule.scope);
         // TODO: what arguments?
         query = rule.scope();
-        debug('scope query', query);
       }
 
       if (!rule.roles) {
-        debug('no rule roles or *');
 
         // TODO: it assumes that we have only correct rules here
         rule.query = query;
@@ -543,37 +524,28 @@ export default class MongoAccessMap {
       let conds = [];
       // Finding only dynamic roles
       for (let roleName of rule.roles) {
-        debug('iterating rule role:', roleName);
         let role = model.schema.roles ? model.schema.roles[roleName] : null;
 
         if (!role) {
           // This actually could happen because our rule might be dynamic only because of scope
-          debug('Role not in possible dynamic roles');
           continue;
         }
 
-        debug('found dynamic role definition:', role);
         // Execute handler
         // TODO: could it be async? On what data it depends? Should we execute it multiple times?
         let calculatedCond = role.cond(ctx);
 
-        debug('calculated cond', calculatedCond);
-
-        if (typeof calculatedCond === "boolean") {
-          debug('condition calculated to boolean - skip');
+        if (typeof calculatedCond === 'boolean') {
           // Not obvious but we skip boolean valued here, as it actually acts as static role
           // and should've been handled before. We can't to anything with boolean at this step
           continue;
         }
 
         let cond = Object.assign(calculatedCond, query);
-        debug('calculated cond + query', cond);
         conds.push(cond);
       }
 
-      debug('OR Conditions', conds);
       if (!conds.length) {
-        debug('finally no conditions built using dynamic roles');
         // return {
         //   allow: rule.allow,
         //   query: query
@@ -592,31 +564,23 @@ export default class MongoAccessMap {
         result = conds[0];
       }
 
-      debug('resulting condition', result);
       rule.query = result;
     }
-
-    debug('RESULTING RULES WITH QUERIES', value.rules);
   }
 
   /**
    * Build query for every ruleset in accessmap values
    */
   buildRuleSetQueries() {
-    debug('buildRuleSetQueries', this.accessMap);
-
-    hl('buildRuleSetQueries');
+    debug(this.model.getName(), 'building rule set queries');
 
     // anyway need to iterate all values
     for (let key of Object.keys(this.accessMap)) {
       // Lets merge all queries set to single query
       let value = this.accessMap[key];
-      debug('iterate map value', value);
-
 
       // TODO not sure
-      if (typeof(value) === "boolean") {
-        debug('rule type is boolean - continue');
+      if (typeof(value) === 'boolean') {
         continue;
       }
 
@@ -647,15 +611,11 @@ export default class MongoAccessMap {
       };
 
       toQuery(mergedQuery, value.rules.slice(0));
-
-      debug('mergedQuery', mergedQuery);
-
       value.query = mergedQuery;
     }
 
-    debug('Resulting access map with set queries', this.accessMap);
+    debug(this.model.getName(), 'Resulting access map with rule set queries', this.accessMap);
     this.built.ruleSetQueries = true;
-
   }
 
   /**
@@ -664,55 +624,39 @@ export default class MongoAccessMap {
   async getQuery() {
     // TODO: cache the result?
 
-    debug('toQuery');
+    debug(this.model.getName(), 'getting single query');
 
     // Handle dependencies
     if (!this.built.ruleQueries) {
-
-      debug('toQuery - run dep = ruleQueries');
       this.buildRuleQueries();
     }
 
     if (!this.built.ruleSetQueries) {
-
-      debug('toQuery - run dep = ruleSetQueries');
-
       this.buildRuleSetQueries();
     }
 
     let queries = {};
 
     for (let ruleSet of Object.values(this.accessMap)) {
-      debug('iterating rule of accessMap', ruleSet);
-
-      if (typeof(ruleSet) === "boolean") {
-        debug('rule type is boolean - continue');
+      if (typeof(ruleSet) === 'boolean') {
         continue;
       }
 
       // calculate unique rule set hash
       // TODO: make another unique check
       let hash = this.toHash(ruleSet);
-      debug('ruleSet hash', hash);
 
       // we should convert rule set to query only once
       if (queries[hash]) {
-        debug('query already exists');
         continue;
       }
 
       queries[hash] = ruleSet.query;
     }
 
-    debug('queries', queries);
-
-
     queries = Object.values(queries);
 
-    debug('Resulting queries array', queries);
-
     if (!queries.length) {
-      debug('No queries');
       return null;
     }
 
@@ -826,7 +770,6 @@ export default class MongoAccessMap {
    * @returns {boolean}
    */
   isFails() {
-    debug('isAccessMapFails', this.accessMap);
     return Object.values(this.accessMap).every(item => {
       if (typeof(item) !== "boolean") {
         return false;
@@ -842,7 +785,6 @@ export default class MongoAccessMap {
    * @returns {boolean|*}
    */
   isPassing() {
-    debug('isPassing');
     return Object.values(this.accessMap).every(item => {
       if (typeof(item) !== "boolean") {
         return false;
@@ -890,8 +832,6 @@ export default class MongoAccessMap {
    * @returns {boolean}
    */
   hasDependentRules() {
-    debug('hasDependentRules', this.accessMap);
-
     for (let val of Object.values(this.accessMap)) {
       if (typeof(val) === 'boolean') {
         continue;
@@ -916,13 +856,10 @@ export default class MongoAccessMap {
    */
   isRuleMatchAction(action) {
     return function(rule) {
-      debug('isRuleMatchAction', action, rule);
       if (!~rule.actions.indexOf('*') && !~rule.actions.indexOf(action)) {
-        debug('false');
         return false;
       }
 
-      debug('true');
       return true;
     }
   }
@@ -935,24 +872,19 @@ export default class MongoAccessMap {
    */
   getCompiledDependentModelQueries() {
 
-    debug('getCompiledDependentModelQueries');
+    debug(this.model.getName(), 'getCompiledDependentModelQueries');
 
     // depends on buildRuleQueries
     // Requires individual rule queries to be built first
     if (!this.built.ruleQueries) {
-
-      debug('handle relation - ruleQueries');
-
       this.buildRuleQueries();
     }
-
-    debug('iterating accessmap');
 
     let models = {};
 
     // TODO: Could be simplified a lot
     for (let val of Object.values(this.accessMap)) {
-      if (typeof(val) == "boolean") {
+      if (typeof(val) === 'boolean') {
         continue;
       }
 
@@ -1001,7 +933,6 @@ export default class MongoAccessMap {
    * TODO: no very optimal approach
    */
   getDependentRules() {
-    debug('get dependent rules');
     let result = [];
 
     let ids = new Set();
@@ -1010,15 +941,12 @@ export default class MongoAccessMap {
 
       let val = this.accessMap[prop];
 
-      debug('iterate value of accessmap', val);
-
       if (typeof(val) === 'boolean') {
         continue;
       }
 
       let dependentRules = val.rules.filter(this.isDependentRule);
       if (!dependentRules.length) {
-        debug('no dependent rules');
         continue;
       }
 
@@ -1031,9 +959,7 @@ export default class MongoAccessMap {
       });
     }
 
-    debug('unique dependent rules result', result);
     return result;
-
   }
 
   /**
@@ -1044,15 +970,9 @@ export default class MongoAccessMap {
    */
   applyDependentData(data) {
 
-    debug('apply dependent data', data);
-    hl('apply dep data');
+    debug(this.model.getName(), 'applying dependent data %j', data);
 
-    debug('accessmap current state %j', this.accessMap);
-
-    // TODO: Dependent on buildRulesQueries
-    // It should be launched before
     if (!this.built.ruleQueries) {
-      debug('dependency required launch build rule queries');
       this.buildRuleQueries();
     }
 
@@ -1061,34 +981,24 @@ export default class MongoAccessMap {
       // TODO we are replacing same val multiple times
       let val = this.accessMap[prop];
 
-      debug('iterate value of accessmap %j', val);
-
-      if (typeof(val) === "boolean") {
+      if (typeof(val) === 'boolean') {
         continue;
       }
 
       let dependentRules = val.rules.filter(this.isDependentRule);
       if (!dependentRules.length) {
-        debug('no dependent rules');
         continue;
       }
 
       dependentRules.forEach(rule => {
 
-        debug('iterate dep rules', rule);
-
         let model = this.getDependentModel(rule);
         let modelName = model.getName();
-
-        hl('applying sift', rule.query, data[modelName].data);
 
         // TODO optimize - no need to reapply same query to the same data
         let queryResult = sift(rule.query, data[modelName].data);
 
-        hl('Query result', queryResult);
-
         if (!queryResult.length) {
-          debug('already fails = need to recalculate accessMap property');
           // Mark accessMap value as need to be recalculated
           val.recalc = true;
 
@@ -1096,39 +1006,27 @@ export default class MongoAccessMap {
           //this.ruleToStrict(rule);
           rule.recalc = true;
         } else {
-          debug('building new query cond');
-
-          debug('rule.checkRelation', rule.checkRelation);
-          debug('model.schema', this.model.schema);
 
           // Get relation to check in order to extract foreignKey name
-
           let relation = this.model.schema.properties[rule.checkRelation];
           let foreignKey = relation.foreignKey;
           let property = this.model.schema.properties[foreignKey];
-          debug('foreignKey', foreignKey);
 
           // should we fix the library
           let newQuery = {[foreignKey]: {'$in': queryResult.map(doc =>
             doc._id
           )}};
 
-          debug('New query', newQuery);
-
           // Store orig query just in case
           rule.origQuery = rule.query;
           rule.query = newQuery;
         }
-
-        debug('UPDATED rule %j', rule);
       });
 
       // Recalculate the whole value if needed
       if (!val.recalc) {
         continue;
       }
-
-      debug('recalculating the value');
 
       let rules = clone(val.rules);
       // Clear current ruleset
@@ -1139,7 +1037,6 @@ export default class MongoAccessMap {
       };
 
       for (let [index, rule] of rules.entries()) {
-        hl('iterating recalc rule', index, rule);
 
         let applyValue = !rule.allow; // TODO: will it actually work?
 
@@ -1147,15 +1044,13 @@ export default class MongoAccessMap {
           applyValue = clone(rule);
         }
 
-        debug('applyValue:', applyValue);
-
         this.accessMap[prop] = this.getNewApplyValue(this.accessMap[prop], applyValue);
       }
 
       debug('recalculated prop', prop, this.accessMap[prop]);
     }
 
-    debug('new access map', this.accessMap);
+    debug(this.model.getName(), 'access map with applied data', this.accessMap);
   }
 
   /**
@@ -1179,15 +1074,12 @@ export default class MongoAccessMap {
    * @param sourceRule
    */
   removeImpossibleRoles(ctx, sourceRule) {
-    debug('remove impossible roles, sourceRule:', sourceRule);
-
     let rule = clone(sourceRule);
 
     // If rule * exists - left only it
     // TODO: should be on app initialization step
     if (~rule.roles.indexOf('*')) {
       rule.roles = ['*'];
-      debug('Match * role, result', rule);
       return rule;
     }
 
@@ -1195,13 +1087,10 @@ export default class MongoAccessMap {
     let dynamicRoles = this.isDependentRule(rule)
       ? this.getDependentModel(rule).getPossibleDynamicRoleNames(ctx)
       : this.model.getPossibleDynamicRoleNames(ctx);
-    debug('dynamicRoles', dynamicRoles);
 
     let roles = [];
 
     let matchedStaticRoles = this.getMatchedRoles(rule, this.staticRoles);
-    debug('- matchedStaticRoles', matchedStaticRoles);
-
     roles = roles.concat(matchedStaticRoles);
 
     // todo should be on app init step
@@ -1216,52 +1105,10 @@ export default class MongoAccessMap {
       roles = this.options.roles;
     }
 
-    debug('- filter with roles', roles);
-
-    debug('- rule.roles before', rule.roles);
     // remove all roles that not in matched roles
     rule.roles = rule.roles.filter(role => {
       return ~roles.indexOf(role);
     });
-
-    debug('- rule.roles after', rule.roles);
-
-    return rule;
-  }
-
-  /**
-   * Set deferred property of the rule
-   * Deferred indicates if rule could be applied immediately or
-   * requires to get some additional data
-   *
-   * @param staticRoles
-   * @param sourceRule
-   */
-  markAsDeferred(staticRoles, sourceRule) {
-
-    // Rule might be deferred or static
-    // Rule is deferred if it has scope or it has dynamic role
-    // Otherwise rule is static
-
-    // The method assumes that all rules are filtered from redundant or incorrect values
-    // If rule has scope or not match static rule or *
-
-    debug('mark as deferred', sourceRule);
-    let rule = clone(sourceRule);
-
-    if (rule.scope || (!~rule.roles.indexOf('*') && !this.isRuleMatchRoles(rule, staticRoles))) {
-      debug('rule is deferred');
-      rule.deferred = true;
-    } else {
-      debug('rule is static');
-
-      // Static rules can't be dependent rules
-      // TODO: not sure it should be placed here
-      // TODO: тут в общем концептуальная ошибка
-      delete rule.checkRelation;
-
-      rule.deferred = false;
-    }
 
     return rule;
   }
@@ -1322,7 +1169,6 @@ export default class MongoAccessMap {
    * @returns {boolean}
    */
   isDependentRule(rule) {
-    debug('isDependentRule');
     return !!rule.checkRelation;
   }
 
@@ -1332,9 +1178,6 @@ export default class MongoAccessMap {
    * @returns {*}
    */
   getDependentModel(rule) {
-    debug('getDependentModel');
     return Spikenail.models[rule.checkRelation];
   }
-
-
 }
