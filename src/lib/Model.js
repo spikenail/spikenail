@@ -654,10 +654,17 @@ export default class Model {
         // TODO: if * exists remove all other actions
       }
 
-      if (rule.scope && typeof rule.scope !== "function") {
+      if (rule.scope && typeof rule.scope !== 'function') {
         // TODO: is it good way to go?
         let scope = clone(rule.scope);
         rule.scope = function() {
+          return scope;
+        }
+      }
+
+      if (rule.checkRelation && rule.checkRelation.scope && rule.checkRelation.scope !== 'function') {
+        let scope = clone(rule.checkRelation.scope);
+        rule.checkRelation.scope = function() {
           return scope;
         }
       }
@@ -813,6 +820,8 @@ export default class Model {
    */
   async handleReadOneACL(result, next, options, _, args, ctx) {
 
+    debug('%s: handle read one ACL', this.getName());
+
     let accessMap = new MongoAccessMap(this, ctx, { action: 'read' });
     await accessMap.init();
 
@@ -822,7 +831,8 @@ export default class Model {
     ctx.accessMap = accessMap;
 
     if (accessMap.isFails()) {
-      // TODO: set something in result?
+      debug('%s: readOne ACL, access map fails', this.getName());
+      result.result = null;
       return;
     }
 
@@ -831,16 +841,17 @@ export default class Model {
     // Check if we need to make a preliminarily request of some data to build final access map
     // TODO: anyway it is better to fetch here and put in dataloader cache
     // TODO: it is very not obvious flow
-    if (!accessMap.hasAtLeastOneTrueValue() && accessMap.hasDependentRules()) {
-      // because of dependent rules we need to fetch this doc anyway to know parent id
-      // the acl will be handled in postACL method
-      return next();
-    }
+    // if (!accessMap.hasAtLeastOneTrueValue() && accessMap.hasDependentRules()) {
+    //   // because of dependent rules we need to fetch this doc anyway to know parent id
+    //   // the acl will be handled in postACL method
+    //   return next();
+    // }
 
     // Compile access map to single query
 
     // We don't need apply query if no documents can be skipped
     if (accessMap.hasAtLeastOneTrueValue()) {
+      debug('%s: readOne ACL, no need to apply query', this.getName());
       return next();
     }
 
@@ -848,8 +859,12 @@ export default class Model {
     let query = await accessMap.getQuery();
 
     if (!query) {
+      // TODO: actually, that should not happen (!)
+      debug('%s: no query built', this.getName());
       return next();
     }
+
+    debug('%s: readOne ACL, apply query %o', query);
 
     // Apply query
     options.query = Object.assign(options.query || {}, query);
@@ -870,9 +885,10 @@ export default class Model {
    * @returns {Promise.<void>}
    */
   async handleHasManyACL(result, next, options, _, args, ctx) {
-    debug(this.getName(), 'handle has many ACL');
-
-    let accessMap = new MongoAccessMap(this, ctx, { action: 'read' });
+    debug('%s: handle has many ACL', this.getName());
+    debug('%s: parent data: %j', this.getName(), _);
+    // TODO Not sure for now how to better pass parent data.
+    let accessMap = new MongoAccessMap(this, ctx, { action: 'read' }, _);
     await accessMap.init();
 
     // Store access map in the context
@@ -893,56 +909,56 @@ export default class Model {
     }
 
     // Check if we need to make a preliminarily request of some data to build final access map
-    if (!accessMap.hasAtLeastOneTrueValue() && accessMap.hasDependentRules()) {
-      // TODO: one possible issue is that parent object might not have enough fields requested
-      // TODO: in order to do later acl check. We need request additional fields.
-      // TODO: or better - determine if hasMany items requested and what fields needed for acl check and add them
-      // TODO: currently we are requesting the whole document anyway
-      // TODO: additionally we can optimize acl rules that only have "test: parent" rule
-      // TODO: in that case no need to check anything
-      debug(this.getName(), 'need to query some data before acl checking');
-
-      // Get dependent rules compiled in single query
-      let dependentModelQueries = accessMap.getCompiledDependentModelQueries();
-      debug(this.getName(), 'dependent mode queries', dependentModelQueries);
-
-      // TODO: use Promise.all
-      for (let data of Object.values(dependentModelQueries)) {
-        // if data already exists no need to query
-        // check if _ instance of model model model
-        if (_[0] instanceof data.model.model) {
-          data.data = _;
-          continue;
-        }
-
-        data.data = await data.model.model.find(data.query);
-        debug(this.getName(), 'fetched data %j', data.data);
-      }
-
-      // Apply dependent data
-      accessMap.applyDependentData(dependentModelQueries);
-
-      debug(this.getName(), 'accessMap with applied data', accessMap);
-    }
+    // if (!accessMap.hasAtLeastOneTrueValue() && accessMap.hasDependentRules()) {
+    //   // TODO: one possible issue is that parent object might not have enough fields requested
+    //   // TODO: in order to do later acl check. We need request additional fields.
+    //   // TODO: or better - determine if hasMany items requested and what fields needed for acl check and add them
+    //   // TODO: currently we are requesting the whole document anyway
+    //   // TODO: additionally we can optimize acl rules that only have "test: parent" rule
+    //   // TODO: in that case no need to check anything
+    //   debug(this.getName(), 'need to query some data before acl checking');
+    //
+    //   // Get dependent rules compiled in single query
+    //   let dependentModelQueries = accessMap.getCompiledDependentModelQueries();
+    //   debug(this.getName(), 'dependent mode queries', dependentModelQueries);
+    //
+    //   // TODO: use Promise.all
+    //   for (let data of Object.values(dependentModelQueries)) {
+    //     // if data already exists no need to query
+    //     // check if _ instance of model model model
+    //     if (_[0] instanceof data.model.model) {
+    //       data.data = _;
+    //       continue;
+    //     }
+    //
+    //     data.data = await data.model.model.find(data.query);
+    //     debug(this.getName(), 'fetched data %j', data.data);
+    //   }
+    //
+    //   // Apply dependent data
+    //   accessMap.applyDependentData(dependentModelQueries);
+    //
+    //   debug(this.getName(), 'accessMap with applied data', accessMap);
+    // }
 
     // Compile access map to single query
     // We don't need apply query if no documents can be skipped
     if (accessMap.hasAtLeastOneTrueValue()) {
-      debug(this.getName(), 'Not need to apply query - no documents might be skipped');
+      debug('%s: Not need to apply query - no documents might be skipped', this.getName());
       return next();
     }
 
-    debug(this.getName(), 'need to apply query');
+    debug('%s: need to apply query', this.getName());
 
     // Try to build query as we possibly need it
     let query = await accessMap.getQuery();
 
     if (!query) {
-      debug(this.getName(), 'no query was produced');
+      debug('%s: no query was produced', this.getName());
       return next();
     }
 
-    debug(this.getName(), 'applying query', query);
+    debug('%s: applying query %o', this.getName(), query);
 
     // Apply query
     options.query = Object.assign(options.query || {}, query);
@@ -953,7 +969,7 @@ export default class Model {
   }
 
   /**
-   * New realization through accessMap classes
+   * Handle read all ACL
    *
    * @param result
    * @param next
@@ -961,12 +977,10 @@ export default class Model {
    * @param _
    * @param args
    * @param ctx
-   * @returns {Promise.<void>}
    * @private
    */
   async handleReadAllACL(result, next, options, _, args, ctx) {
-
-    debug(this.getName(), 'handle readAll ACL');
+    debug('%s: handle readAll ACL', this.getName());
 
     // TODO: pass requested (+dependent) fields in options
     let accessMap = new MongoAccessMap(this, ctx, { action: 'read' });
@@ -976,42 +990,33 @@ export default class Model {
     ctx.accessMap = accessMap;
 
     if (accessMap.isFails()) {
+      debug('%s: accessMap fails from the beginning', this.getName());
       result.result = {
         edges: null
       };
       return;
     }
 
-    // Check if we need to make a preliminarily request of some data to build final access map
-    if (!accessMap.hasAtLeastOneTrueValue() && accessMap.hasDependentRules()) {
-      // Get dependent rules compiled in single query
-      let dependentModelQueries = accessMap.getCompiledDependentModelQueries();
-
-      // TODO: use Promise.all
-      for (let data of Object.values(dependentModelQueries)) {
-        // TODO: we might not want to call mongo query explicitly here
-        // TODO: we need to query only limited set of fields
-        // TODO: e.g. the query is { param: 123 }, then we only need "param" field
-        data.data = await data.model.model.find(data.query);
-      }
-
-      // Apply dependent data
-      accessMap.applyDependentData(dependentModelQueries);
-    }
-
-    // Compile access map to single query
-
-    // We don't need apply query if no documents can be skipped
+    // We don't need to apply query if we unable to skip whole documents
+    // In this case we will handle deps later if needed
     if (accessMap.hasAtLeastOneTrueValue()) {
+      debug('%s: access map has true values, no need to apply query. Next', this.getName());
       return next();
     }
+
+    // before building query handle deps if needed
+    await accessMap.handleDependencies();
 
     // Try to build query as we possibly need it
     let query = await accessMap.getQuery();
 
+    // FIXME: If below is possible that something probably went wrong!
     if (!query) {
+      debug('%s: no query is generated', this.getName());
       return next();
     }
+
+    debug('%s: apply query: %o', this.getName(), query);
 
     // Apply query
     options.query = Object.assign(options.query || {}, query);
@@ -1081,7 +1086,7 @@ export default class Model {
    * @param data
    */
   applyAccessMapToData(accessMap, data) {
-    debug(this.getName(), 'apply accessMap to data %j', data);
+    debug('%s: apply accessMap to data %j', this.getName(), data);
 
     return data.map(sourceDoc => {
       let doc = clone(sourceDoc);
@@ -1134,8 +1139,30 @@ export default class Model {
 
       debug(this.getName(), 'doc with applied accessMap', doc);
 
+      // check if doc is all null values document - return null then
+      let isAllNull = true;
+      let plainNode = doc.toObject();
+      for (let key of Object.keys(plainNode)) {
+        if (accessMap.accessMap[key] === undefined) {
+          continue;
+        }
+
+        if (plainNode[key] !== null) {
+          isAllNull = false;
+          break;
+        }
+      }
+
+      if (isAllNull) {
+        debug(this.getName(), 'all null');
+        return null;
+      }
+
       return doc;
-    }); // TODO: should we apply filter and remove all-null objects
+    }).filter(doc => {
+      // remove null docs
+      return doc !== null
+    });
   }
 
   /**
@@ -1161,6 +1188,7 @@ export default class Model {
 
     // Skip for empty result
     if (!result || !result.result) {
+      debug('%s no readOne result %o', this.getName());
       return next();
     }
 
@@ -1183,12 +1211,16 @@ export default class Model {
 
     result.result = resultData[0] || null;
 
+    // FIXME: it is fast workaround - see readAll postACL to perform correct check
+    if (result.result._id === null) {
+      result.result = null;
+    }
+
     next();
   }
 
+
   /**
-   * Handle read all ACL after data is fetched
-   * In this method we should filter resulting data according an access map
    *
    * @param result
    * @param next
@@ -1198,10 +1230,11 @@ export default class Model {
    * @param ctx
    */
   async postHandleReadAllACL(result, next, options, _, args, ctx) {
-    debug(this.getName(), 'post handle readAll ACL');
+    debug('%s post handle readAll ACL', this.getName());
 
     // Skip if no access map defined
     if (!ctx.accessMap) {
+      debug('%s post handle readAll ACL - no access map skip', this.getName());
       return next();
     }
 
@@ -1210,158 +1243,41 @@ export default class Model {
       return next();
     }
 
-    // Skip for plain access map with no queries
-    // TODO
-
-    // Skip for access map with one query covering all values
-    // TODO
-
-    // Check if we need to prefetch some parent data
-    // If access map have some dependent rules
-    // Check that access map has dependent rules and they were no handled before
-
-    // Access map might be changed to this step, but we need to check initial configuration
-    if (ctx.accessMap.initialProps.hasDependentRules && ctx.accessMap.initialProps.hasAtLeastOneTrueValue) {
-      // lets get needed relations and foreignKeys in order to collect parent ids
-      // iterate dependent rules
-      // build models map
-      let dependentRules = ctx.accessMap.getDependentRules();
-
-      let modelsMap = {};
-      for (let rule of dependentRules) {
-        let model = ctx.accessMap.getDependentModel(rule);
-        let modelName = model.getName();
-
-        // Initialize
-        if (modelsMap[modelName]) {
-          continue;
-        }
-
-        modelsMap[modelName] = {
-          model: model,
-          foreignKey: this.publicProperties[modelName].foreignKey,
-          ids: new Set()
-        }
-      }
-
-      // Fill ids array of modelsMap
-      for (let edge of result.result.edges) {
-        let doc = edge.node;
-
-        for (let val of Object.values(modelsMap)) {
-          if (doc[val.foreignKey]) {
-            val.ids.add(doc[val.foreignKey]);
-          }
-        }
-      }
-
-      // Then iterate map perform queries
-      // TODO: we need only limited fields to be fetched
-      // TODO: use Promise.all
-      for (let val of Object.values(modelsMap)) {
-        val.data = await val.model.model.find({ _id: { '$in': Array.from(val.ids) } })
-      }
-
-      ctx.accessMap.applyDependentData(modelsMap);
+    // Skip for plain access map with no queries - nothing to do
+    if (ctx.accessMap.isPlain()) {
+      debug('%s access map is plain skip', this.getName());
+      return next();
     }
 
-    // Applying queries from accessMap to resulting data
-    // TODO: probably, we should put data formatting in the last middleware
-    // TODO: and not access edges here
+    // Skip for access map with one query covering all values
+    // In this case no individual values filtering needed
+    // TODO
 
-    // TODO: we need some condition to skip this part
-    // TODO: because some acls might be very simple or not exists at all
-    // TODO: at least accessMap.hasRules()
 
-    // TODO: should no run if not needed - only one set of rules applied to all fields
-    result.result.edges = result.result.edges.map(sdoc => {
+    // TODO: this is workaround - we should put data formatting in last step
+    // Let's change result.result format to simple array
+    let data = result.result.edges.map(edge => {
+      return edge.node;
+    });
 
-      let doc = clone(sdoc);
+    // Handle dependencies if needed
+    if (ctx.accessMap.isUnresolved()) {
+      // FIXME: for some reason access map of list is unresolved - it should not be!
+      debug('%s: accessMap is unresolved - handle deps', this.getName());
 
-      debug(this.getName(), 'postACL, doc iteration', doc);
+      await ctx.accessMap.handleDependencies(data);
+    }
 
-      // iterate through rules
-      // TODO: move to another method
+    let filteredData = this.applyAccessMapToData(ctx.accessMap, data);
 
-      // Cache query results
-      let testedQueries = {};
+    debug('filteredData', filteredData);
 
-      for (let prop of Object.keys(ctx.accessMap.accessMap)) {
-        let val = ctx.accessMap.accessMap[prop];
-
-        let allow;
-
-        if (typeof(val) ==='boolean') {
-          allow = val;
-        } else {
-          let query = val.query;
-          // Apply query on object
-          // TODO: we don't need md5
-          let queryId = md5(JSON.stringify(query));
-          // Check for cached result
-          if (testedQueries[queryId] !== undefined) {
-            allow = testedQueries[queryId];
-          } else {
-            debug(this.getName(), 'applying query %j', query);
-            debug(this.getName(), 'to data', [doc.node]);
-            // Apply query
-            // TODO: probably, we should put data formatting in the last middleware
-            // TODO: and not access node here
-            let queryResult = sift(query, [doc.node]);
-
-            if (queryResult.length) {
-              debug(this.getName(), 'query matched doc');
-              allow = true;
-            } else {
-              debug(this.getName(), 'query does not match the doc');
-              allow = false;
-            }
-            testedQueries[queryId] = allow;
-          }
-        }
-
-        if (!allow) {
-
-          // FIXME: quick workaround
-          if (prop == 'id') {
-            doc.node['_id'] = null;
-            continue;
-          }
-
-          // TODO: probably, we should put data formatting in the last middleware
-          // TODO: and not access node here
-          // TODO: should we actually remove property completely with delete
-          // TODO: we currently operate with mongoose objects
-          // TODO: should we ever convert it to plain objects
-          doc.node[prop] = null;
-        }
+    // Apply formatting
+    // TODO: it is workaround
+    result.result.edges = filteredData.map(item => {
+      return {
+        node: item
       }
-
-      debug(this.getName(), 'resulting node', doc.node.toObject());
-
-      // check if doc is all null values document - return null then
-      let isAllNull = true;
-      let plainNode = doc.node.toObject();
-      for (let key of Object.keys(plainNode)) {
-        if (ctx.accessMap.accessMap[key] === undefined) {
-          continue;
-        }
-
-        if (plainNode[key] !== null) {
-          isAllNull = false;
-          break;
-        }
-      }
-
-      if (isAllNull) {
-        debug(this.getName(), 'all null');
-        return null;
-      }
-
-      return doc;
-    }).filter(doc => {
-      // remove null docs
-      return doc !== null
     });
 
     next();

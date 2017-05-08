@@ -54,12 +54,14 @@
     "lodash.capitalize": "^4.2.1",
     "lodash.clone": "^4.5.0",
     "lodash.isplainobject": "^4.0.6",
+    "lodash.memoize": "^4.1.2",
     "md5": "^2.2.1",
     "mongoose": "^4.5.10",
     "pluralize": "^3.0.0",
     "relay-mongoose-connection": "github:shenyzore/relay-mongoose-connection",
     "require-all": "^2.0.0",
     "sift": "git+https://github.com/igorlesnenko/sift.js.git",
+    "uuid": "^3.0.1",
     "validator": "^6.0.0"
   },
   "devDependencies": {

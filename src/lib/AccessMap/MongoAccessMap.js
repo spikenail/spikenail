@@ -2,6 +2,8 @@ const debug = require('debug')('spikenail:MongoAccessMap');
 const hl = require('debug')('hl');
 
 const clone = require('lodash.clone');
+const memoize = require('lodash.memoize');
+const uuidV1 = require('uuid/v1');
 const isPlainObject = require('lodash.isplainobject');
 
 const md5 = require('md5');
@@ -25,10 +27,12 @@ export default class MongoAccessMap {
    * @param ctx
    * @param options
    */
-  constructor(model, ctx, options = {}) {
+  constructor(model, ctx, options = {}, parentData) {
     debug(model.getName(), 'constructor', options);
 
     // TODO: filter by requested fields
+
+    this.parentData = parentData; // TODO: deprecated?
 
     this.model = model;
 
@@ -36,7 +40,7 @@ export default class MongoAccessMap {
 
     this.options = options;
 
-    this.sourceACLs = clone(model.getACLs());
+    this.sourceACLs = clone(options.acls || model.getACLs());
 
     //let staticRoles = this.model.getStaticRoles(ctx);
     this.staticRoles = this.model.getStaticRoles(ctx);
@@ -50,7 +54,7 @@ export default class MongoAccessMap {
    * @returns {Promise.<void>}
    */
   async init() {
-    debug(this.model.getName(), 'initialize access map');
+    debug('%s: initializing access map...', this.model.getName());
 
     // TODO: move this stuff on app initialization step
     // Handle rule injecting
@@ -171,6 +175,204 @@ export default class MongoAccessMap {
   }
 
   /**
+   * Resolve access map tree
+   *
+   * @param parentData - if exists fetch would be perform based on this data
+   * @returns {Promise.<void>}
+   */
+  async handleDependencies(parentData) {
+
+    debug('%s: ------------ Handle access map dependencies', this.model.getName());
+    debug('%s: parent data %o', this.model.getName(), parentData);
+    if (this.isFails()) {
+      debug('%s: access map fails no need to handle deps', this.model.getName());
+      return;  // TODO: What is it?
+    }
+
+    let queriesMap = {};
+
+    // TODO: memoization for same rules - don't process twice
+    for (let prop of Object.keys(this.accessMap)) {
+
+      if (typeof this.accessMap[prop] === 'boolean') {
+        continue;
+      }
+
+      debug('%s: prop: %s', this.model.getName(), prop);
+      let rules = this.accessMap[prop].rules;
+
+
+      for (let rule of rules) {
+        if (!this.isDependentRule(rule)) {
+          continue;
+        }
+
+        debug('%s: dep rule %o', this.model.getName(), rule);
+
+        let query = null;
+
+        // check if possible to generate query
+        // Check if it is last stage of tree
+        if (rule.accessMap.isResolved) {
+          debug('%s: access map (RESOLVED) - get query', this.model.getName());
+
+          // TODO: duplicates
+          query = await rule.accessMap.getQuery();
+
+          debug('%s: push dep access map query %o:', this.model.getName(), query);
+        } else {
+          debug('%s: access map has dep rules (not last) - HANDLE DEPS', this.model.getName());
+
+          // TODO: in some rare(?) cases there will be two parent query instead of one
+          await rule.accessMap.handleDependencies(parentData);
+
+          debug('%s: parentData as a result of handleDependencies: %o', this.model.getName(), parentData);
+
+          query = await rule.accessMap.getQuery();
+
+          debug('%s: new query after deps handling: %o', this.model.getName(), query);
+        }
+
+        // Push query if generated
+        debug('%s: pushing query', this.model.getName());
+
+        // TODO only unique queries
+        if (!queriesMap[rule.accessMap.model.getName()]) {
+          queriesMap[rule.accessMap.model.getName()] = {
+            queries: [],
+            rules: []
+          };
+        }
+        // TODO: Push only unique queries and rules (!) otherwise final query will be redundant or cond
+
+        // diff are possible theoretically - diff actions
+        // TODO: is it ok to check for empty query?
+        if (query) {
+          queriesMap[rule.accessMap.model.getName()].queries.push(query);
+          queriesMap[rule.accessMap.model.getName()].rules.push(rule);
+        }
+      }
+    }
+
+    // Using queries map fetch data and apply
+    // iterate through dep models
+    let depModelNames = Object.keys(queriesMap);
+
+    debug('%s: depModelNames: %o', this.model.getName(), depModelNames);
+
+    if (!depModelNames.length) {
+      debug('%s: no deps', this.model.getName());
+      return;
+    }
+
+    // Data map that is required for applyDependentData method
+    let modelsMap = {};
+
+
+    debug('%s: --- queriesMap %o', this.model.getName(), queriesMap);
+
+    for (let modelName of Object.keys(queriesMap)) {
+
+      debug('%s: handle dep of: %s', this.model.getName(), modelName);
+
+      let queries = queriesMap[modelName].queries;
+      let rules = queriesMap[modelName].rules;
+
+      // Make or query
+      // TODO: remove redundant queries
+      let query = this.queriesToOrQuery(queries);
+      debug('%s: or query %o', this.model.getName(), query);
+
+      // initialize
+      if (!modelsMap[modelName]) {
+        modelsMap[modelName] = {
+          model: Spikenail.models[modelName]
+        }
+      }
+
+      // If parent data fo THIS model exists
+      debug('%s: check that parent data instance of modelName', this.model.getName());
+      if (parentData && (parentData[0] instanceof Spikenail.models[modelName].model)) {
+
+        debug('%s: parent data exists: %o', this.model.getName(), parentData);
+
+        let ids = new Set();
+
+        // collect ids
+        for (let doc of parentData) {
+          ids.add(doc.id);
+        }
+        
+        debug('%s: ids %o', this.model.getName(), ids);
+
+        query = this.queriesToAndQuery([query, { '_id': { $in: Array.from(ids) }}]);
+      }
+
+      debug('%s: final query: %o', this.model.getName(), query);
+
+      // Fetch
+      let data = await Spikenail.models[modelName].model.find(query);
+      debug('%s: fetched dep data %o', this.model.getName(), data);
+      modelsMap[modelName].data = data;
+    }
+
+    debug('%s: before applying data', this.model.getName());
+
+    this.applyDependentData(modelsMap);
+
+    debug('%s ---------- dependent data applied. resolved = true', this.model.getName());
+
+    this.isResolved = true;
+  }
+
+  /**
+   * Check that all values of access map are booleans
+   */
+  isPlain() {
+    return Object.values(this.accessMap).every(val => { return typeof val === 'boolean' });
+  }
+
+  /**
+   * Check if access map has some unresolved deps
+   */
+  isUnresolved() {
+
+    debug('--- is unresolved %o', this.accessMap);
+
+    return !this.isResolved;
+
+    // return !Object.values(this.accessMap).every(val => {
+    //   if (typeof val === 'boolean') {
+    //     return true;
+    //   }
+    //
+    //   for (let rule of val.rules) {
+    //     if (rule.accessMap) {
+    //       debug('--- rule has accessMap included %o', rule);
+    //       return false;
+    //     }
+    //   }
+    //
+    //   return true;
+    // });
+  }
+
+  /**
+   * Convert array of queries to single AND query
+   * @param queries
+   * @returns {*}
+   */
+  queriesToAndQuery(queries) {
+    if (queries.length > 1) {
+      return {
+        $and: queries
+      }
+    }
+
+    return queries[0];
+  }
+
+  /**
    * Remove unmatched properties if specified
    *
    * @param properties
@@ -286,131 +488,256 @@ export default class MongoAccessMap {
     return acls;
   }
 
+  /**
+   * Get dependent access map for rule
+   * TODO: memoize
+   *
+   * @param rule
+   */
+  // TODO refactoring
+  async getDependentAccessMap(rule) {
+    let depModel = this.getDependentModel(rule);
+
+    let relationACL = rule.checkRelation;
+
+    let acls = null;
+    // Create new set of ACL rules for map if scope or roles defined
+    if (relationACL.scope || relationACL.roles) {
+      acls = [{
+        allow: false,
+        properties: ['*'],
+        roles: ['*'],
+        actions: ['*']
+      }, {
+        allow: true,
+        properties: ['*'],
+        action:['*'],
+        scope: relationACL.scope,
+        roles: relationACL.roles || ['*'] // TODO: only dynamic roles make sense. Should we do something about this
+      }];
+
+      debug('%s ACLs for dep map overrided %o', this.model.getName(), acls);
+
+    }
+    // Build access map for dependent model
+    // TODO: memoize
+    // let opts = { roles: relationACL.roles };
+
+
+
+    // Ability to specify for which action we are checking access relation
+    // if (relationACL.action) {
+    //   opts.action = relationACL.action;
+    //   opts.properties = null;
+    //   opts.onlyDependentRules = null;
+    // }
+
+    let opts = {
+      action: relationACL.action,
+      acls: acls
+      // TODO: should we merge it with this.options?
+    };
+
+    let depAccessMap = new MongoAccessMap(
+      depModel,
+      this.ctx,
+      opts
+    );
+    await depAccessMap.init();
+
+    // TODO: so memoize by set of rules + model name?
+    return depAccessMap;
+  }
 
   /**
-   * Builds access map from acls
-   *
-   * Property will receive boolean value, or if rule is deferred
-   *
-   * Applies ACL rules on model properties
-   * Might be deferred
-   * TODO: cond function could return static value - e.g. false, or true.
-   * TODO: if, for example, user is anonymous
-   * TODO: think later how it should be implemented
-   *
-   * @param acls raw schema acl rules defined by user
+   * Returns access map with initial values
+   * By default all is allowed
    */
-  async buildAccessMap(acls) {
-
-    debug(this.model.getName(), 'buildAccessMap, acls:', acls);
-
-    let ctx = this.ctx;
-
-    // TODO: we should probably filter and prepare ACL rules in one method.
-    // TODO: as it is not obvious that this method requires filtered ACLs
-    // TODO: think later what name of the function and args are better
-
+  getInitialAccessMap() {
     // Initialize the access map of properties
     let accessMap = {};
 
     let initialProps = this.options.properties || Object.keys(this.model.schema.properties);
     initialProps.forEach(field => {
       // By default, everything is allowed
-      accessMap[field] = true;
+      accessMap[field] = true
     });
 
-    for (let [index, rule] of acls.entries()) {
-      debug(this.model.getName(), 'processing rule: %o', rule);
+    return accessMap;
+  }
 
+  /**
+   * Build access map tree
+   *
+   * @returns {Promise.<void>}
+   */
+  async buildAccessMap() {
+    debug('%s: buildAccessMap, acls: %o', this.model.getName(), this.acls);
+    let accessMap = this.getInitialAccessMap();
+
+    // Build and simplify map without handling deps
+    for (let rule of this.acls) {
+      debug('%s processing rule: %o', this.model.getName(), rule);
+
+      // lets set unique id to rule
+      // We need it for memoization in order to avoid redundant processing as we clone rule objects
+      // TODO: not sure it should be done here and not on some initialization step
+      rule.id = uuidV1();
+
+      // Determine the value to apply
       let applyValue = rule.allow;
-
-      // First of all lets check if it is dependent rule and could be resolved in place
-      if (this.isDependentRule(rule)) {
-        debug(this.model.getName(), 'rule is dependent, try to resolve');
-        let depModel = this.getDependentModel(rule);
-
-        // Build access map for dependent model
-        // TODO: memoize
-
-        let opts = { roles: rule.roles };
-
-        // Ability to specify for which action we are checking access relation
-        if (rule.checkAction) {
-          opts.action = rule.checkAction;
-          opts.properties = null;
-          opts.onlyDependentRules = null;
-        }
-
-        let depAccessMap = new MongoAccessMap(
-          depModel,
-          this.ctx,
-          Object.assign(
-            clone(this.options),
-            opts
-          )
-        );
-        await depAccessMap.init();
-
-        debug(this.model.getName(), 'dependent access map initialized: %o', depAccessMap.accessMap);
-
-        // Currently, check for at least one true value for given roles of course
-        if (depAccessMap.hasAtLeastOneTrueValue()) {
-          debug(this.model.getName(), 'rule resolved to true (at least one true)');
-          applyValue = true;
-        } else if (depAccessMap.isFails()) {
-          debug(this.model.getName(), 'rule resolved to false (all false)');
-          applyValue = false;
-        } else {
-          debug(this.model.getName(), 'can not resolve in place, build the query');
-          // Unable to instantly determine an access based on static roles
-          // build query and use it as scope
-
-          // An issue - constructor is not async stuff
-          let query = await depAccessMap.getQuery();
-          debug(this.model.getName(), 'dependent map query is %j', query);
-          // TODO: we could possibly pick up the query of _id/or lists field only
-          // TODO: means simplest query that will give us allow true value
-
-          // Synthetic rule where scope is query on dependent model
-          applyValue = {
-            // allow only in case we allow to access dependent relation
-            allow: true,
-            fields: ['*'],
-            roles: ['*'],
-            //test: 123,
-            scope: function () { return query },
-            actions: [this.options.action],
-            checkRelation: depModel.getName()
-          }
-        }
-      } else if (this.isDeferredRule(rule)) {
-        debug(this.model.getName(), 'rule is deferred, will calculate it later');
-        applyValue = clone(rule);
+      if (this.isDependentRule(rule) || this.isDeferredRule(rule)) {
+        debug('%s: rule is deferred of dependent', this.model.getName());
+        applyValue = rule;
       }
 
-      debug(this.model.getName(), 'resulting apply value: %o', applyValue);
+      // Determine to which properties to apply the rule
+      let props = rule.properties;
+      if (~rule.properties.indexOf('*')) {
+        props = this.options.properties || Object.keys(accessMap);
+      }
 
-      // Apply rule to specific properties of model
-      for (let prop of rule.properties) {
-        if (prop === '*') {
-          // Properties could be manually specified by user
-          let props = this.options.properties || Object.keys(accessMap);
-
-          for (let prop of props) {
-            // TODO: no time to think why we need all these clone statements
-            accessMap[prop] = clone(this.getNewApplyValue(clone(accessMap[prop]), clone(applyValue)));
-          }
-          break;
-        }
-
-        // We have to check current value
+      // Applying
+      for (let prop of props) {
         accessMap[prop] = clone(this.getNewApplyValue(clone(accessMap[prop]), clone(applyValue)));
       }
     }
 
-    debug(this.model.getName(), 'resulting accessMap', accessMap);
+    debug('%s: access map with applied rules, acls: %o', this.model.getName(), accessMap);
 
+    // Build related access maps for deps that left
+    // Try to simplify
+
+    // Build dependent access map
+    let getDependentAccessMap = memoize(this.getDependentAccessMap.bind(this), function(rule) {
+      debug('memoize return key rule.id', rule.id);
+      return rule.id;
+    });
+
+    let recalcProps = new Set();
+    for (let prop of Object.keys(accessMap)) {
+      let val = accessMap[prop];
+
+      if (typeof val === 'boolean') {
+        continue;
+      }
+
+      debug('%s: simplifying rules of prop %s', this.model.getName(), prop);
+
+      // Iterate rules
+      for (let [index, rule] of val.rules.entries()) {
+        if (this.isDependentRule(rule)) {
+          debug('%s found dep rule %o', this.model.getName(), rule);
+
+          let depAccessMap = await getDependentAccessMap(rule);
+
+          let newRuleVal = null;
+          // Convert rule to boolean value if possible
+          if (depAccessMap.hasAtLeastOneTrueValue()) {
+            newRuleVal = rule.allow;
+
+            // if rules is also deferred
+            if (this.isDeferredRule(rule)) {
+              debug('rule is also deferred');
+              newRuleVal = clone(rule);
+              delete newRuleVal.checkRelation
+            }
+
+            debug('%s dep map has one true value - resolve rule to %o', this.model.getName(), newRuleVal);
+          } else if (depAccessMap.isFails()) {
+            newRuleVal = !rule.allow;
+
+            // if rules is also deferred
+            if (this.isDeferredRule(rule)) {
+              debug('rule is also deferred');
+              newRuleVal = clone(rule);
+              delete newRuleVal.checkRelation;
+              newRuleVal.allow = !newRuleVal.allow;
+            }
+
+            debug('%s: dep map fails - resolve rule to %o', this.model.getName(), newRuleVal);
+          } else {
+            // just put access map to rule
+            rule.accessMap = depAccessMap;
+            debug('%s: cant resolve dep map in place', this.model.getName());
+          }
+
+          if (newRuleVal !== null) {
+            debug('%s: -------\\\----replaced val at index %o - %o', this.model.getName(), index, newRuleVal);
+            val.rules[index] = newRuleVal;
+            recalcProps.add(prop);
+          } else {
+            debug('-----///----- no replace');
+          }
+        }
+      }
+    }
+
+    debug('%s recalc props %o', this.model.getName(), recalcProps);
+
+    if (!recalcProps.size) {
+      debug('%s resulting accessMap %o', this.model.getName(), accessMap);
+      return accessMap;
+    }
+
+    debug('...recalcing...');
+
+    for (let prop of recalcProps) {
+      debug('%s recalculating prop %s', this.model.getName(), prop);
+      //accessMap[prop].rules;
+      accessMap[prop] = this.recalcRules(accessMap[prop].rules);
+    }
+
+    debug('%s recalced accessMap %o', this.model.getName(), accessMap);
     return accessMap;
+  }
+
+  /**
+   * Recalculates rules
+   *
+   * @param rules
+   */
+  recalcRules(rules) {
+
+    let firstVal = rules.shift();
+
+    let newVal = {
+      rules: [firstVal]
+    };
+
+    if (typeof firstVal === 'boolean') {
+      newVal = firstVal;
+    }
+
+    for (let rule of rules) {
+      newVal = clone(this.getNewApplyValue(clone(newVal), clone(rule)));
+    }
+
+    return newVal;
+  }
+
+
+  /**
+   * Fetch and apply dependent data to build final access map
+   *
+   * @returns {Promise.<void>}
+   */
+  async initDependencies() {
+    debug('%s init deps', this.model.getName());
+
+    let depRules = this.getDependentRules();
+
+    // Check if dep rule exist
+    if (!depRules) {
+      debug('%s no dep rules', this.model.getName());
+      return null; //??
+    }
+
+    debug('%s dep rules found %o', this.model.getName(), depRules);
+
+
+    let depQueries = this.getCompiledDependentModelQueries()
+
   }
 
   /**
@@ -622,16 +949,16 @@ export default class MongoAccessMap {
    * Convert the whole access map to single query if possible
    */
   async getQuery() {
-    // TODO: cache the result?
-
-    debug(this.model.getName(), 'getting single query');
+    debug('%s: getQuery', this.model.getName());
 
     // Handle dependencies
     if (!this.built.ruleQueries) {
+      debug('%s: getQuery - need to build rule queries', this.model.getName());
       this.buildRuleQueries();
     }
 
     if (!this.built.ruleSetQueries) {
+      debug('%s: getQuery - need to build ruleset queries', this.model.getName());
       this.buildRuleSetQueries();
     }
 
@@ -655,6 +982,8 @@ export default class MongoAccessMap {
     }
 
     queries = Object.values(queries);
+
+    debug('%s: getQuery - queries: %o', this.model.getName(), queries);
 
     if (!queries.length) {
       return null;
@@ -872,7 +1201,7 @@ export default class MongoAccessMap {
    */
   getCompiledDependentModelQueries() {
 
-    debug(this.model.getName(), 'getCompiledDependentModelQueries');
+    debug('%s getCompiledDependentModelQueries', this.model.getName());
 
     // depends on buildRuleQueries
     // Requires individual rule queries to be built first
@@ -951,6 +1280,7 @@ export default class MongoAccessMap {
       }
 
       dependentRules.forEach(rule => {
+        // FIXME: stringify will trim scope - so two different rules might look the same
         let ruleId = JSON.stringify(rule);
         if (!ids.has(ruleId)) {
           result.push(rule);
@@ -970,11 +1300,13 @@ export default class MongoAccessMap {
    */
   applyDependentData(data) {
 
-    debug(this.model.getName(), 'applying dependent data %j', data);
+    debug('%s: applying dependent data %j', this.model.getName(), data);
 
     if (!this.built.ruleQueries) {
       this.buildRuleQueries();
     }
+
+    debug('%s: rule queries are built', this.model.getName());
 
     // Now we need to filter data using sift
     for (let prop of Object.keys(this.accessMap)) {
@@ -985,18 +1317,26 @@ export default class MongoAccessMap {
         continue;
       }
 
+      debug('%s: val %o', this.model.getName(), val);
+
       let dependentRules = val.rules.filter(this.isDependentRule);
+
+      debug('%s: depRules %o', this.model.getName(), dependentRules);
       if (!dependentRules.length) {
         continue;
       }
 
       dependentRules.forEach(rule => {
 
+        debug('%s: iterating rule %o', this.model.getName(), rule);
+
         let model = this.getDependentModel(rule);
         let modelName = model.getName();
 
         // TODO optimize - no need to reapply same query to the same data
         let queryResult = sift(rule.query, data[modelName].data);
+
+        debug('%s: queryResult %o', this.model.getName(), queryResult);
 
         if (!queryResult.length) {
           // Mark accessMap value as need to be recalculated
@@ -1008,9 +1348,9 @@ export default class MongoAccessMap {
         } else {
 
           // Get relation to check in order to extract foreignKey name
-          let relation = this.model.schema.properties[rule.checkRelation];
+          let relation = this.model.schema.properties[rule.checkRelation.name];
           let foreignKey = relation.foreignKey;
-          let property = this.model.schema.properties[foreignKey];
+          //let property = this.model.schema.properties[foreignKey];
 
           // should we fix the library
           let newQuery = {[foreignKey]: {'$in': queryResult.map(doc =>
@@ -1020,6 +1360,8 @@ export default class MongoAccessMap {
           // Store orig query just in case
           rule.origQuery = rule.query;
           rule.query = newQuery;
+
+          debug('%s: newQuery %o', this.model.getName(), newQuery);
         }
       });
 
@@ -1047,10 +1389,10 @@ export default class MongoAccessMap {
         this.accessMap[prop] = this.getNewApplyValue(this.accessMap[prop], applyValue);
       }
 
-      debug('recalculated prop', prop, this.accessMap[prop]);
+      debug('%s: recalculated prop %s %o', this.model.getName(), prop, this.accessMap[prop]);
     }
 
-    debug(this.model.getName(), 'access map with applied data', this.accessMap);
+    debug('%s: access map with applied data %o',this.model.getName(), this.accessMap);
   }
 
   /**
@@ -1098,6 +1440,7 @@ export default class MongoAccessMap {
 
     roles = roles.concat(matchedDynamicRoles);
 
+    // TODO does it make sense?
     // It is possible to manually specify roles for which we will build access map
     // TODO: don't like it placed here. The function should only remove impossible roles
     // TODO: and not do anything else
@@ -1178,6 +1521,6 @@ export default class MongoAccessMap {
    * @returns {*}
    */
   getDependentModel(rule) {
-    return Spikenail.models[rule.checkRelation];
+    return Spikenail.models[rule.checkRelation.name];
   }
 }
