@@ -887,20 +887,15 @@ export default class Model {
   async handleHasManyACL(result, next, options, _, args, ctx) {
     debug('%s: handle has many ACL', this.getName());
     debug('%s: parent data: %j', this.getName(), _);
-    // TODO Not sure for now how to better pass parent data.
+
     let accessMap = new MongoAccessMap(this, ctx, { action: 'read' }, _);
     await accessMap.init();
 
     // Store access map in the context
-    // TODO: here we are probably overriding previous accessMap of parent items.
-    // TODO: any potential issue? It is still the same context I guess
     ctx.accessMap = accessMap;
 
-    debug(this.getName(), 'hasMany ACL accessMap', ctx.accessMap.accessMap);
-
     if (accessMap.isFails()) {
-      debug(this.getName(), 'hasMany ACL, access map fails, exiting');
-      // return empty result
+      debug('%s: accessMap fails from the beginning', this.getName());
       // TODO: all this formatting stuff should not be here
       result.result = {
         edges: null
@@ -908,62 +903,31 @@ export default class Model {
       return;
     }
 
-    // Check if we need to make a preliminarily request of some data to build final access map
-    // if (!accessMap.hasAtLeastOneTrueValue() && accessMap.hasDependentRules()) {
-    //   // TODO: one possible issue is that parent object might not have enough fields requested
-    //   // TODO: in order to do later acl check. We need request additional fields.
-    //   // TODO: or better - determine if hasMany items requested and what fields needed for acl check and add them
-    //   // TODO: currently we are requesting the whole document anyway
-    //   // TODO: additionally we can optimize acl rules that only have "test: parent" rule
-    //   // TODO: in that case no need to check anything
-    //   debug(this.getName(), 'need to query some data before acl checking');
-    //
-    //   // Get dependent rules compiled in single query
-    //   let dependentModelQueries = accessMap.getCompiledDependentModelQueries();
-    //   debug(this.getName(), 'dependent mode queries', dependentModelQueries);
-    //
-    //   // TODO: use Promise.all
-    //   for (let data of Object.values(dependentModelQueries)) {
-    //     // if data already exists no need to query
-    //     // check if _ instance of model model model
-    //     if (_[0] instanceof data.model.model) {
-    //       data.data = _;
-    //       continue;
-    //     }
-    //
-    //     data.data = await data.model.model.find(data.query);
-    //     debug(this.getName(), 'fetched data %j', data.data);
-    //   }
-    //
-    //   // Apply dependent data
-    //   accessMap.applyDependentData(dependentModelQueries);
-    //
-    //   debug(this.getName(), 'accessMap with applied data', accessMap);
-    // }
-
-    // Compile access map to single query
-    // We don't need apply query if no documents can be skipped
+    // We don't need to apply query if we unable to skip whole documents
+    // In this case we will handle deps later if needed
     if (accessMap.hasAtLeastOneTrueValue()) {
-      debug('%s: Not need to apply query - no documents might be skipped', this.getName());
+      debug('%s: access map has true values, no need to apply query. Next', this.getName());
       return next();
     }
 
-    debug('%s: need to apply query', this.getName());
+    // before building query handle deps if needed
+    await accessMap.handleDependencies({
+     [this.getName()]: _
+    });
 
     // Try to build query as we possibly need it
     let query = await accessMap.getQuery();
 
+    // FIXME: If below is possible that something probably went wrong!
     if (!query) {
-      debug('%s: no query was produced', this.getName());
+      debug('%s: no query is generated', this.getName());
       return next();
     }
 
-    debug('%s: applying query %o', this.getName(), query);
+    debug('%s: apply query: %o', this.getName(), query);
 
     // Apply query
     options.query = Object.assign(options.query || {}, query);
-
-    debug(this.getName(), 'finally applied query', options.query);
 
     next();
   }
@@ -1265,7 +1229,7 @@ export default class Model {
       // FIXME: for some reason access map of list is unresolved - it should not be!
       debug('%s: accessMap is unresolved - handle deps', this.getName());
 
-      await ctx.accessMap.handleDependencies(data);
+      await ctx.accessMap.handleDependencies({ [this.getName()]: data });
     }
 
     let filteredData = this.applyAccessMapToData(ctx.accessMap, data);

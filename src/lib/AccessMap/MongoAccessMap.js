@@ -176,22 +176,25 @@ export default class MongoAccessMap {
 
   /**
    * Resolve access map tree
+   * TODO: handle non-skippable case
    *
-   * @param parentData - if exists fetch would be perform based on this data
+   * @param data - store all fetched data
    * @returns {Promise.<void>}
    */
-  async handleDependencies(parentData) {
+  async handleDependencies(data) {
 
     debug('%s: ------------ Handle access map dependencies', this.model.getName());
-    debug('%s: parent data %o', this.model.getName(), parentData);
+    debug('%s: data %o', this.model.getName(), data);
     if (this.isFails()) {
       debug('%s: access map fails no need to handle deps', this.model.getName());
-      return;  // TODO: What is it?
+      // TODO: What is it?
+      return;
     }
 
     let queriesMap = {};
 
     // TODO: memoization for same rules - don't process twice
+    // Iterate properties of access map (e.g. id, name, email)
     for (let prop of Object.keys(this.accessMap)) {
 
       if (typeof this.accessMap[prop] === 'boolean') {
@@ -201,7 +204,7 @@ export default class MongoAccessMap {
       debug('%s: prop: %s', this.model.getName(), prop);
       let rules = this.accessMap[prop].rules;
 
-
+      // Rules iteration
       for (let rule of rules) {
         if (!this.isDependentRule(rule)) {
           continue;
@@ -222,20 +225,20 @@ export default class MongoAccessMap {
           debug('%s: push dep access map query %o:', this.model.getName(), query);
         } else {
           debug('%s: access map has dep rules (not last) - HANDLE DEPS', this.model.getName());
-
           // TODO: in some rare(?) cases there will be two parent query instead of one
-          await rule.accessMap.handleDependencies(parentData);
+          // If for access map that we are going to handle
+          if (data && data[rule.accessMap.model.getName()]) {
+            debug('%s: data exists for dependent accessMap %s: %o', this.model.getName(), rule.accessMap.model.getName(), data[rule.accessMap.model.getName()]);
+          } else {
+            debug('%s: parent data NOT exists for dependent access map %s. Handle deps:', this.model.getName(), rule.accessMap.model.getName());
+            await rule.accessMap.handleDependencies(data);
+            debug('%s: parentData as a result of handleDependencies: %o', this.model.getName(), data);
+            query = await rule.accessMap.getQuery();
+            debug('%s: new query after deps handling: %o', this.model.getName(), query);
+          }
 
-          debug('%s: parentData as a result of handleDependencies: %o', this.model.getName(), parentData);
-
-          query = await rule.accessMap.getQuery();
-
-          debug('%s: new query after deps handling: %o', this.model.getName(), query);
         }
-
         // Push query if generated
-        debug('%s: pushing query', this.model.getName());
-
         // TODO only unique queries
         if (!queriesMap[rule.accessMap.model.getName()]) {
           queriesMap[rule.accessMap.model.getName()] = {
@@ -245,11 +248,13 @@ export default class MongoAccessMap {
         }
         // TODO: Push only unique queries and rules (!) otherwise final query will be redundant or cond
 
-        // diff are possible theoretically - diff actions
-        // TODO: is it ok to check for empty query?
+        // TODO: diff are possible theoretically - diff actions
         if (query) {
+          debug('%s: pushing query', this.model.getName());
           queriesMap[rule.accessMap.model.getName()].queries.push(query);
           queriesMap[rule.accessMap.model.getName()].rules.push(rule);
+        } else {
+          debug('%s: no query to push', this.model.getName())
         }
       }
     }
@@ -268,9 +273,9 @@ export default class MongoAccessMap {
     // Data map that is required for applyDependentData method
     let modelsMap = {};
 
-
     debug('%s: --- queriesMap %o', this.model.getName(), queriesMap);
 
+    // Fetch data for dependent models
     for (let modelName of Object.keys(queriesMap)) {
 
       debug('%s: handle dep of: %s', this.model.getName(), modelName);
@@ -290,30 +295,22 @@ export default class MongoAccessMap {
         }
       }
 
-      // If parent data fo THIS model exists
       debug('%s: check that parent data instance of modelName', this.model.getName());
-      if (parentData && (parentData[0] instanceof Spikenail.models[modelName].model)) {
 
-        debug('%s: parent data exists: %o', this.model.getName(), parentData);
-
-        let ids = new Set();
-
-        // collect ids
-        for (let doc of parentData) {
-          ids.add(doc.id);
-        }
-        
-        debug('%s: ids %o', this.model.getName(), ids);
-
-        query = this.queriesToAndQuery([query, { '_id': { $in: Array.from(ids) }}]);
+      // Check if data exists - don't fetch if so
+      let fetchedData = [];
+      if (data && data[modelName]) {
+        debug('%s: parent data exists: %o', this.model.getName(), data[modelName]);
+        fetchedData = data[modelName]
+      } else {
+        // Fetch if data not exists
+        debug('%s: parent data NOT exists: %o', this.model.getName());
+        fetchedData = await Spikenail.models[modelName].model.find(query);
+        debug('%s: fetched dep data %o', this.model.getName(), fetchedData);
       }
 
-      debug('%s: final query: %o', this.model.getName(), query);
-
-      // Fetch
-      let data = await Spikenail.models[modelName].model.find(query);
-      debug('%s: fetched dep data %o', this.model.getName(), data);
-      modelsMap[modelName].data = data;
+      //debug('%s: final query: %o', this.model.getName(), query);
+      modelsMap[modelName].data = fetchedData || [];
     }
 
     debug('%s: before applying data', this.model.getName());
@@ -841,6 +838,8 @@ export default class MongoAccessMap {
         query = rule.scope();
       }
 
+      // TODO: need to handle both scopes - checkRelation and current rule scope.
+      // TODO: maybe create 2 queries - internal and external and merge them on applyDependentData step
       if (!rule.roles) {
 
         // TODO: it assumes that we have only correct rules here
