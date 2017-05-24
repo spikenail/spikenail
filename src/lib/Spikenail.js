@@ -97,7 +97,7 @@ class Spikenail extends EventEmitter {
 
       await this.boot();
 
-      this.app.listen(5000, (err) => {
+      this.server = this.app.listen(5000, (err) => {
         if (err) {
           throw err;
         }

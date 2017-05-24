@@ -969,7 +969,7 @@ export default class MongoAccessMap {
       }
 
       // calculate unique rule set hash
-      // TODO: make another unique check
+      // FIXME: make another unique check. possible circular issues? concat ids of rules
       let hash = this.toHash(ruleSet);
 
       // we should convert rule set to query only once
@@ -1279,11 +1279,9 @@ export default class MongoAccessMap {
       }
 
       dependentRules.forEach(rule => {
-        // FIXME: stringify will trim scope - so two different rules might look the same
-        let ruleId = JSON.stringify(rule);
-        if (!ids.has(ruleId)) {
+        if (!ids.has(rule.id)) {
           result.push(rule);
-          ids.add(ruleId);
+          ids.add(rule.id);
         }
       });
     }
