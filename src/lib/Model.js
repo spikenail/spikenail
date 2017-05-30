@@ -317,8 +317,7 @@ export default class Model {
    *
    * @returns {Promise.<void>}
    */
-  async handleCreateACL(result, next, options, _, args, ctx) {
-    debug(this.getName(), 'handling Create ACL');
+  async handleCreateACL(result, next, options, _, ctx) {
 
     // Create access map for current model, specifying only props that we trying to save
     let accessMap = new MongoAccessMap(this, ctx, { action: options.action, properties: Object.keys(_) });
@@ -608,7 +607,9 @@ export default class Model {
     for (let key of Object.keys(input)) {
       let prop = this.publicProperties[key];
 
-      if (prop.type == 'id') {
+      // typeof check is added in order to avoid attempts to convert already substituted ObjectId like userId
+      // TODO: but it looks like kind of workaround
+      if (prop && prop.type == 'id' && typeof input[key] === 'string') {
         input[key] = fromGlobalId(input[key]).id;
       }
     }
@@ -1301,24 +1302,23 @@ export default class Model {
    * @param ctx
    */
   calculateDynamicRoles(ctx) {
-    debug('init dynamic roles');
-    if (!this.model.schema.roles) {
-      return {}
+    let dynamicRoles = this.getDynamicRoles(ctx);
+
+    if (!dynamicRoles) {
+      return {};
     }
 
     let roles = {};
-    Object.keys(this.model.schema.roles).forEach(roleName => {
+    Object.keys(dynamicRoles).forEach(roleName => {
 
-      let calculatedCond = this.model.schema.roles[roleName].cond(ctx);
+      let calculatedCond = dynamicRoles[roleName].cond(ctx);
       if (typeof calculatedCond === 'boolean') {
         roles[roleName] = calculatedCond;
         return;
       }
 
-      roles[roleName] = this.model.schema.roles[roleName];
+      roles[roleName] = dynamicRoles[roleName];
     });
-
-    debug('initialized dynamic roles');
 
     return roles;
   }
