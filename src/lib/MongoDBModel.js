@@ -77,7 +77,11 @@ export default class MongoDBModel extends Model {
       //}
 
       // Plain field
-      propsMap[prop] = this.fieldToMongooseType(field);
+      propsMap[prop] = { type: this.fieldToMongooseType(field) };
+
+      if (field.default) {
+        propsMap[prop].default = field.default;
+      }
     }
 
     debug('mongoose props', propsMap);
