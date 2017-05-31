@@ -390,9 +390,7 @@ export default class Model {
    * @param ctx
    * @returns {Promise.<*>}
    */
-  async handleUpdateACL(result, next, options, _, args, ctx) {
-
-    debug('handle Update ACL _', _, result);
+  async handleUpdateACL(result, next, options, _, ctx) {
 
     let accessMap = new MongoAccessMap(this, ctx, { action: options.action, properties: Object.keys(_) });
     await accessMap.init();
@@ -427,7 +425,7 @@ export default class Model {
     let doc = await this.query.bind(this, {
       method: 'findOne',
       query: { _id: new mongoose.Types.ObjectId(id) }
-    }, _, args)();
+    }, _, {})();
 
     if (!doc) {
       debug('no document found');
@@ -524,7 +522,7 @@ export default class Model {
    * @param ctx
    * @returns {Promise.<void>}
    */
-  async handleRemoveACL(result, next, options, _, args, ctx) {
+  async handleRemoveACL(result, next, options, _, ctx) {
     let accessMap = new MongoAccessMap(this, ctx, { action: options.action, properties: Object.keys(_) });
     await accessMap.init();
 
@@ -555,7 +553,7 @@ export default class Model {
     let doc = await this.query.bind(this, {
       method: 'findOne',
       query: { _id: new mongoose.Types.ObjectId(id) }
-    }, _, args)();
+    }, _, {})();
 
     if (!doc) {
       //TODO: should we have explicit difference between not found and 403?
