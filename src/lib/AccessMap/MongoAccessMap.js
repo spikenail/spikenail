@@ -808,7 +808,7 @@ export default class MongoAccessMap {
       // queries[hash] = queryVal;
     }
 
-    debug(this.model.getName(), 'map with rule queries %j', this.accessMap);
+    debug('%s: map with rule queries %O', this.model.getName(), this.accessMap);
 
     this.built.ruleQueries = true;
   }
@@ -850,7 +850,7 @@ export default class MongoAccessMap {
       let conds = [];
       // Finding only dynamic roles
       for (let roleName of rule.roles) {
-        let role = model.schema.roles ? model.schema.roles[roleName] : null;
+        let role = model.getDynamicRoles(ctx)[roleName];
 
         if (!role) {
           // This actually could happen because our rule might be dynamic only because of scope

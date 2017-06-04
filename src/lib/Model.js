@@ -1168,6 +1168,7 @@ export default class Model {
     // TODO: We need to put data formatting at last step
     let data = [result.result];
 
+    // FIXME: always applies, but should not in some cases
     let resultData = this.applyAccessMapToData(ctx.accessMap, data);
 
     debug('%s resultData %o', this.getName(), resultData);
@@ -1175,7 +1176,7 @@ export default class Model {
     result.result = resultData[0] || null;
 
     // FIXME: it is fast workaround - see readAll postACL to perform correct check
-    if (result.result._id === null) {
+    if (result.result && result.result._id === null) {
       result.result = null;
     }
 
@@ -1277,6 +1278,7 @@ export default class Model {
    */
   getDynamicRoles(ctx) {
     // Owner is predefined custom role
+    // TODO: predefine or init step. Otherwise, roles should be accessed only through this method
     let roles = {
       owner: {
         cond: function(ctx) {
@@ -1284,7 +1286,7 @@ export default class Model {
             return false;
           }
 
-          return { userId: ctx.currentUser }
+          return { userId: ctx.currentUser._id }
         }
       }
     };
