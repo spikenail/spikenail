@@ -835,39 +835,6 @@ export default class Model {
       return;
     }
 
-    // TODO: The only deference between all methods is prefetch algorithm - handle it!
-    /// GOOD point that we don't need to prefetch
-    // Check if we need to make a preliminarily request of some data to build final access map
-    // TODO: anyway it is better to fetch here and put in dataloader cache
-    // TODO: it is very not obvious flow
-    // if (!accessMap.hasAtLeastOneTrueValue() && accessMap.hasDependentRules()) {
-    //   // because of dependent rules we need to fetch this doc anyway to know parent id
-    //   // the acl will be handled in postACL method
-    //   return next();
-    // }
-
-    // Compile access map to single query
-
-    // We don't need apply query if no documents can be skipped
-    if (accessMap.hasAtLeastOneTrueValue()) {
-      debug('%s: readOne ACL, no need to apply query', this.getName());
-      return next();
-    }
-
-    // Try to build query as we possibly need it
-    let query = await accessMap.getQuery();
-
-    if (!query) {
-      // TODO: actually, that should not happen (!)
-      debug('%s: no query built', this.getName());
-      return next();
-    }
-
-    debug('%s: readOne ACL, apply query %o', query);
-
-    // Apply query
-    options.query = Object.assign(options.query || {}, query);
-
     next();
   }
 
@@ -988,6 +955,8 @@ export default class Model {
   }
 
   /**
+   *
+   * @deprecated
    *
    * @param accessMap
    * @param data current data
@@ -1129,7 +1098,7 @@ export default class Model {
   }
 
   /**
-   * handle read one acl
+   * Post handle read one ACL
    *
    * @param result
    * @param next
@@ -1140,49 +1109,52 @@ export default class Model {
    * @returns {Promise.<void>}
    */
   async postHandleReadOneACL(result, next, options, _, args, ctx) {
-    debug('%s postHandleReadOneACL %o', this.getName(), ctx.accessMap.accessMap);
+    try {
+      debug('%s postHandleReadOneACL %o', this.getName(), ctx.accessMap.accessMap);
 
-    debug('result', result);
+      debug('result', result);
 
-    // Skip if no access map defined
-    if (!ctx.accessMap) {
-      return next();
+      // Skip if no access map defined
+      if (!ctx.accessMap) {
+        return next();
+      }
+
+      // Skip for empty result
+      if (!result || !result.result) {
+        debug('%s no readOne result %o', this.getName());
+        return next();
+      }
+
+      // Handle dependencies if needed
+      // FIXME: will always be unresolved even it does not have dependencies
+      if (ctx.accessMap.isUnresolved()) {
+        debug('%s: accessMap is unresolved - handle deps', this.getName());
+        await ctx.accessMap.handleDependencies({[this.getName()]: [result.result]});
+      }
+
+      ctx.accessMap.buildRuleSetQueries();
+
+      // TODO: We need to put data formatting at last step
+      let data = [result.result];
+
+      // FIXME: always applies, but should not in some cases
+      let resultData = this.applyAccessMapToData(ctx.accessMap, data);
+
+      debug('%s resultData %o', this.getName(), resultData);
+
+      result.result = resultData[0] || null;
+
+      // FIXME: it is fast workaround - see readAll postACL to perform correct check
+      if (result.result && result.result._id === null) {
+        result.result = null;
+      }
+
+      next();
+    } catch (e) {
+      console.error(e);
+      throw e;
     }
-
-    // Skip for empty result
-    if (!result || !result.result) {
-      debug('%s no readOne result %o', this.getName());
-      return next();
-    }
-
-    // Access map might be changed to this step, but we need to check initial configuration
-    // TODO: replace not obvious check with something like hasUnresolvedDependencies
-    // TODO: it is very unclear why we are checking it below
-    if (ctx.accessMap.initialProps.hasDependentRules) {
-      let modelsMap = await this.fetchDataForDependentRules(ctx.accessMap, result.result);
-      ctx.accessMap.applyDependentData(modelsMap);
-    }
-
-    ctx.accessMap.buildRuleSetQueries();
-
-    // TODO: We need to put data formatting at last step
-    let data = [result.result];
-
-    // FIXME: always applies, but should not in some cases
-    let resultData = this.applyAccessMapToData(ctx.accessMap, data);
-
-    debug('%s resultData %o', this.getName(), resultData);
-
-    result.result = resultData[0] || null;
-
-    // FIXME: it is fast workaround - see readAll postACL to perform correct check
-    if (result.result && result.result._id === null) {
-      result.result = null;
-    }
-
-    next();
   }
-
 
   /**
    *
@@ -1209,6 +1181,7 @@ export default class Model {
 
     // Skip for plain access map with no queries - nothing to do
     if (ctx.accessMap.isPlain()) {
+      // FIXME: why we should not apply it. Still different values for different fields
       debug('%s access map is plain skip', this.getName());
       return next();
     }

@@ -521,7 +521,6 @@ export default class MongoAccessMap {
     // let opts = { roles: relationACL.roles };
 
 
-
     // Ability to specify for which action we are checking access relation
     // if (relationACL.action) {
     //   opts.action = relationACL.action;
@@ -899,6 +898,12 @@ export default class MongoAccessMap {
    */
   buildRuleSetQueries() {
     debug(this.model.getName(), 'building rule set queries');
+
+    // Handle dependencies
+    if (!this.built.ruleQueries) {
+      debug('%s: buildRuleSetQueries - need to build rule queries', this.model.getName());
+      this.buildRuleQueries();
+    }
 
     // anyway need to iterate all values
     for (let key of Object.keys(this.accessMap)) {
