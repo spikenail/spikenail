@@ -313,15 +313,21 @@ export default class Model {
   }
 
   /**
-   * Handle create ACL
+   * Create ACL
    *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param ctx
    * @returns {Promise.<void>}
    */
   async handleCreateACL(result, next, options, _, ctx) {
-
     // Create access map for current model, specifying only props that we trying to save
     let accessMap = new MongoAccessMap(this, ctx, { action: options.action, properties: Object.keys(_) });
     await accessMap.init();
+
+    debug('%s: handleCreateACL: %o', this.getName(), accessMap.accessMap);
 
     ctx.accessMap = accessMap;
 
@@ -338,11 +344,11 @@ export default class Model {
 
     let input = this.extractInputKeys(_);
 
-    // Check if access map has dependent rules
-    if (accessMap.hasDependentRules()) {
-      // Fetch dependent data and apply
-      let data = await this.fetchDataForDependentRules(accessMap, input);
-      accessMap.applyDependentData(data);
+    if (accessMap.isUnresolved()) {
+      await accessMap.handleDependencies({
+        [this.getName()]: [_]
+      });
+
       accessMap.buildRuleSetQueries();
 
       // Check one more time - as applying dependent data might produce false values
@@ -355,6 +361,8 @@ export default class Model {
         return;
       }
     }
+
+    hl('%s: handleCreateACL - final access map: %o', this.getName(), accessMap.accessMap);
 
     // Check for all true values
     if (accessMap.isPassing()) {
@@ -386,12 +394,10 @@ export default class Model {
    * @param next
    * @param options
    * @param _
-   * @param args
    * @param ctx
-   * @returns {Promise.<*>}
+   * @returns {Promise.<void>}
    */
   async handleUpdateACL(result, next, options, _, ctx) {
-
     let accessMap = new MongoAccessMap(this, ctx, { action: options.action, properties: Object.keys(_) });
     await accessMap.init();
 
@@ -400,9 +406,7 @@ export default class Model {
     // If access map has at least one strict false value we throw 403 error
     // We can't just trim this value and save all other, as it might lead to misunderstanding
     if (accessMap.hasAtLeastOneFalseValue()) {
-
       debug('access map has at least one false');
-
       result.errors = [{
         message: 'Access denied',
         code: '403'
@@ -437,9 +441,12 @@ export default class Model {
       return;
     }
 
-    if (accessMap.hasDependentRules()) {
-      let modelsMap = await this.fetchDataForDependentRules(accessMap, doc);
-      accessMap.applyDependentData(modelsMap);
+    if (accessMap.hasDependentRules() && accessMap.isUnresolved()) {
+      await accessMap.handleDependencies({
+        [this.getName()]: [doc]
+      });
+
+      // Check one more time - as applying dependent data might produce false values
       if (accessMap.hasAtLeastOneFalseValue()) {
         result.errors = [{
           message: 'Access denied',
@@ -479,9 +486,12 @@ export default class Model {
       await accessMap.init();
 
       let newDoc = Object.assign({}, doc.toObject(), input);
-      // Apply dependent data based on input
-      let modelsMap = await this.fetchDataForDependentRules(accessMap, newDoc);
-      accessMap.applyDependentData(modelsMap);
+
+      // TODO: cache something - double dependencies handling
+      await accessMap.handleDependencies({
+        [this.getName()]: [newDoc]
+      });
+
       if (accessMap.hasAtLeastOneFalseValue()) {
         result.errors = [{
           message: 'Access denied',
@@ -518,9 +528,8 @@ export default class Model {
    * @param next
    * @param options
    * @param _
-   * @param args
    * @param ctx
-   * @returns {Promise.<void>}
+   * @returns {Promise.<*>}
    */
   async handleRemoveACL(result, next, options, _, ctx) {
     let accessMap = new MongoAccessMap(this, ctx, { action: options.action, properties: Object.keys(_) });
@@ -564,9 +573,11 @@ export default class Model {
       return;
     }
 
-    if (accessMap.hasDependentRules()) {
-      let modelsMap = await this.fetchDataForDependentRules(accessMap, doc);
-      accessMap.applyDependentData(modelsMap);
+    if (accessMap.hasDependentRules() && accessMap.isUnresolved()) {
+      await accessMap.handleDependencies({
+        [this.getName()]: [doc]
+      });
+
       if (accessMap.hasAtLeastOneTrueValue()) {
         return next();
       }

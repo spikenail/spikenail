@@ -162,6 +162,8 @@ export default class MongoAccessMap {
     // Store flags to check what data has already built
     this.built = {};
 
+    hl('%s: filtered acls: %o', this.model.getName(), this.acls);
+
     // Build map without queries
     this.accessMap = await this.buildAccessMap(this.acls);
 
@@ -508,7 +510,7 @@ export default class MongoAccessMap {
       }, {
         allow: true,
         properties: ['*'],
-        action:['*'],
+        actions:['*'],
         scope: relationACL.scope,
         roles: relationACL.roles || ['*'] // TODO: only dynamic roles make sense. Should we do something about this
       }];
@@ -673,6 +675,7 @@ export default class MongoAccessMap {
 
     if (!recalcProps.size) {
       debug('%s resulting accessMap %o', this.model.getName(), accessMap);
+      hl('%s: resulting accessMap: %o', this.model.getName(), accessMap);
       return accessMap;
     }
 
@@ -685,6 +688,8 @@ export default class MongoAccessMap {
     }
 
     debug('%s recalced accessMap %o', this.model.getName(), accessMap);
+
+    hl('%s: resulting accessMap: %o', this.model.getName(), accessMap);
     return accessMap;
   }
 
