@@ -345,8 +345,8 @@ export default class Model {
     let input = this.extractInputKeys(_);
 
     if (accessMap.isUnresolved()) {
-      await accessMap.handleDependencies({
-        [this.getName()]: [_]
+      await accessMap.handleDependencies({}, {
+        [this.getName()]: [input]
       });
 
       accessMap.buildRuleSetQueries();
@@ -442,7 +442,7 @@ export default class Model {
     }
 
     if (accessMap.hasDependentRules() && accessMap.isUnresolved()) {
-      await accessMap.handleDependencies({
+      await accessMap.handleDependencies({}, {
         [this.getName()]: [doc]
       });
 
@@ -488,7 +488,7 @@ export default class Model {
       let newDoc = Object.assign({}, doc.toObject(), input);
 
       // TODO: cache something - double dependencies handling
-      await accessMap.handleDependencies({
+      await accessMap.handleDependencies({}, {
         [this.getName()]: [newDoc]
       });
 
@@ -574,7 +574,7 @@ export default class Model {
     }
 
     if (accessMap.hasDependentRules() && accessMap.isUnresolved()) {
-      await accessMap.handleDependencies({
+      await accessMap.handleDependencies({}, {
         [this.getName()]: [doc]
       });
 
@@ -1140,7 +1140,7 @@ export default class Model {
       // FIXME: will always be unresolved even it does not have dependencies
       if (ctx.accessMap.isUnresolved()) {
         debug('%s: accessMap is unresolved - handle deps', this.getName());
-        await ctx.accessMap.handleDependencies({[this.getName()]: [result.result]});
+        await ctx.accessMap.handleDependencies({}, {[this.getName()]: [result.result]});
       }
 
       ctx.accessMap.buildRuleSetQueries();

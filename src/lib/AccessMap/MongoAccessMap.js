@@ -181,19 +181,32 @@ export default class MongoAccessMap {
    * TODO: handle non-skippable case
    *
    * @param data - store all fetched data
+   * @param untrustedData
    * @returns {Promise.<void>}
    */
-  async handleDependencies(data) {
+  async handleDependencies(data, untrustedData) {
 
-    debug('%s: ------------ Handle access map dependencies', this.model.getName());
-    debug('%s: data %o', this.model.getName(), data);
+    if (!data) {
+      data = {};
+    }
+
+    if (!untrustedData) {
+      untrustedData = {};
+    }
+
+    hl('%s: ------------ Handle access map dependencies', this.model.getName());
+    hl('%s: data %o', this.model.getName(), data);
+    hl('%s: untrustedData: %o', this.model.getName(), untrustedData);
     if (this.isFails()) {
-      debug('%s: access map fails no need to handle deps', this.model.getName());
+      hl('%s: access map fails no need to handle deps', this.model.getName());
       // TODO: What is it?
       return;
     }
 
     let queriesMap = {};
+
+    // TODO: ugly memoization workaround
+    let processedRules = [];
 
     // TODO: memoization for same rules - don't process twice
     // Iterate properties of access map (e.g. id, name, email)
@@ -203,7 +216,7 @@ export default class MongoAccessMap {
         continue;
       }
 
-      debug('%s: prop: %s', this.model.getName(), prop);
+      hl('%s: prop: %s', this.model.getName(), prop);
       let rules = this.accessMap[prop].rules;
 
       // Rules iteration
@@ -212,33 +225,63 @@ export default class MongoAccessMap {
           continue;
         }
 
-        debug('%s: dep rule %o', this.model.getName(), rule);
+        if (~processedRules.indexOf(rule.id)) {
+          hl('rule with id', rule.id, 'already processed');
+          continue;
+        }
+
+        processedRules.push(rule.id);
+
+        hl('%s: dep rule %o', this.model.getName(), rule);
 
         let query = null;
 
+        // Check if untrusted data contains data of current model
+        // If so prefetch dependencies and store it in untrusted data in order to optimize dependencies handling
+        // by preventing fetching of all possible documents
+        if (untrustedData[this.model.getName()]) {
+          hl('%s: untrustedData exists for current model', this.model.getName());
+          // Lets fetch all dependencies for the fk
+          hl('%s rule %o', this.model.getName(), rule);
+
+          let rel = this.model.publicProperties[rule.checkRelation.name];
+          let fk = rel.foreignKey;
+          //this.model.publicProperties[fk];
+          //let id = untrustedData[this.model.getName()][fk];
+          let ids = untrustedData[this.model.getName()].map(doc => doc[fk]);
+          hl('%s: ids: %o', this.model.getName(), ids);
+
+          let depModel = this.getDependentModel(rule);
+          let untrustedItems = await depModel.model.find({ _id: { '$in': ids } });
+
+          hl('%s: untrustedItems: %o', this.model.getName(), untrustedItems);
+
+          untrustedData[depModel.getName()] = untrustedItems;
+        }
+
         // check if possible to generate query
         // Check if it is last stage of tree
-        if (rule.accessMap.isResolved) {
-          debug('%s: access map (RESOLVED) - get query', this.model.getName());
+        // If no dependencies or already resolved
+        if (!rule.accessMap.hasDependentRules() || rule.accessMap.isResolved) {
+          hl('%s: access map (RESOLVED) - get query', this.model.getName());
 
           // TODO: duplicates
           query = await rule.accessMap.getQuery();
 
-          debug('%s: push dep access map query %o:', this.model.getName(), query);
+          hl('%s: push dep access map query %o:', this.model.getName(), query);
         } else {
-          debug('%s: access map has dep rules (not last) - HANDLE DEPS', this.model.getName());
+          hl('%s: access map has dep rules (not last) - HANDLE DEPS', this.model.getName());
           // TODO: in some rare(?) cases there will be two parent query instead of one
           // If for access map that we are going to handle
           if (data && data[rule.accessMap.model.getName()]) {
-            debug('%s: data exists for dependent accessMap %s: %o', this.model.getName(), rule.accessMap.model.getName(), data[rule.accessMap.model.getName()]);
+            hl('%s: data exists for dependent accessMap %s: %o', this.model.getName(), rule.accessMap.model.getName(), data[rule.accessMap.model.getName()]);
           } else {
-            debug('%s: parent data NOT exists for dependent access map %s. Handle deps:', this.model.getName(), rule.accessMap.model.getName());
-            await rule.accessMap.handleDependencies(data);
-            debug('%s: parentData as a result of handleDependencies: %o', this.model.getName(), data);
+            hl('%s: parent data NOT exists for dependent access map %s. Handle deps:', this.model.getName(), rule.accessMap.model.getName());
+            await rule.accessMap.handleDependencies(data, untrustedData);
+            hl('%s: parentData as a result of handleDependencies: %o', this.model.getName(), data);
             query = await rule.accessMap.getQuery();
-            debug('%s: new query after deps handling: %o', this.model.getName(), query);
+            hl('%s: new query after deps handling: %o', this.model.getName(), query);
           }
-
         }
         // Push query if generated
         // TODO only unique queries
@@ -252,11 +295,11 @@ export default class MongoAccessMap {
 
         // TODO: diff are possible theoretically - diff actions
         if (query) {
-          debug('%s: pushing query', this.model.getName());
+          hl('%s: pushing query', this.model.getName());
           queriesMap[rule.accessMap.model.getName()].queries.push(query);
           queriesMap[rule.accessMap.model.getName()].rules.push(rule);
         } else {
-          debug('%s: no query to push', this.model.getName())
+          hl('%s: no query to push', this.model.getName())
         }
       }
     }
@@ -265,22 +308,22 @@ export default class MongoAccessMap {
     // iterate through dep models
     let depModelNames = Object.keys(queriesMap);
 
-    debug('%s: depModelNames: %o', this.model.getName(), depModelNames);
+    hl('%s: depModelNames: %o', this.model.getName(), depModelNames);
 
     if (!depModelNames.length) {
-      debug('%s: no deps', this.model.getName());
+      hl('%s: no deps', this.model.getName());
       return;
     }
 
     // Data map that is required for applyDependentData method
     let modelsMap = {};
 
-    debug('%s: --- queriesMap %o', this.model.getName(), queriesMap);
+    hl('%s: --- queriesMap %o', this.model.getName(), queriesMap);
 
     // Fetch data for dependent models
     for (let modelName of Object.keys(queriesMap)) {
 
-      debug('%s: handle dep of: %s', this.model.getName(), modelName);
+      hl('%s: handle dep of: %s', this.model.getName(), modelName);
 
       let queries = queriesMap[modelName].queries;
       let rules = queriesMap[modelName].rules;
@@ -288,7 +331,7 @@ export default class MongoAccessMap {
       // Make or query
       // TODO: remove redundant queries
       let query = this.queriesToOrQuery(queries);
-      debug('%s: or query %o', this.model.getName(), query);
+      hl('%s: or query %o', this.model.getName(), query);
 
       // initialize
       if (!modelsMap[modelName]) {
@@ -297,29 +340,38 @@ export default class MongoAccessMap {
         }
       }
 
-      debug('%s: check that parent data instance of modelName', this.model.getName());
+      hl('%s: check that parent data instance of modelName', this.model.getName());
 
       // Check if data exists - don't fetch if so
       let fetchedData = [];
       if (data && data[modelName]) {
-        debug('%s: parent data exists: %o', this.model.getName(), data[modelName]);
+        hl('%s: parent data exists: %o', this.model.getName(), data[modelName]);
         fetchedData = data[modelName]
       } else {
-        // Fetch if data not exists
-        debug('%s: parent data NOT exists: %o', this.model.getName());
-        fetchedData = await Spikenail.models[modelName].model.find(query);
-        debug('%s: fetched dep data %o', this.model.getName(), fetchedData);
+
+        hl('%s: parent data NOT exists: %o', this.model.getName());
+
+        // If untrusted data exists for the model, use it instead of real fetch
+        if (untrustedData[modelName]) {
+          hl('%s: untrusted data exists, sift instead of fetch', this.model.getName());
+          fetchedData = sift(query, untrustedData[modelName]);
+          hl('%s: sift result %o', this.model.getName(), fetchedData);
+        } else {
+          // Fetch if data not exists
+          fetchedData = await Spikenail.models[modelName].model.find(query);
+          hl('%s: fetched dep data %o', this.model.getName(), fetchedData);
+        }
       }
 
       //debug('%s: final query: %o', this.model.getName(), query);
       modelsMap[modelName].data = fetchedData || [];
     }
 
-    debug('%s: before applying data', this.model.getName());
+    hl('%s: before applying data', this.model.getName());
 
     this.applyDependentData(modelsMap);
 
-    debug('%s ---------- dependent data applied. resolved = true', this.model.getName());
+    hl('%s ---------- dependent data applied. resolved = true', this.model.getName());
 
     this.isResolved = true;
   }
@@ -950,7 +1002,7 @@ export default class MongoAccessMap {
       value.query = mergedQuery;
     }
 
-    debug(this.model.getName(), 'Resulting access map with rule set queries', this.accessMap);
+    debug('%s: Resulting access map with rule set queries. %o', this.model.getName(), this.accessMap);
     this.built.ruleSetQueries = true;
   }
 
