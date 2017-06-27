@@ -221,6 +221,8 @@ export default class MongoAccessMap {
 
       // Rules iteration
       for (let rule of rules) {
+
+        // противоречие воникает - рул считается депендентом а тут бац и хуй
         if (!this.isDependentRule(rule)) {
           continue;
         }
@@ -595,6 +597,7 @@ export default class MongoAccessMap {
     );
     await depAccessMap.init();
 
+    hl('---------- dep ACccess map %o', depAccessMap.accessMap);
     // TODO: so memoize by set of rules + model name?
     return depAccessMap;
   }
@@ -676,50 +679,53 @@ export default class MongoAccessMap {
 
       // Iterate rules
       for (let [index, rule] of val.rules.entries()) {
-        if (this.isDependentRule(rule)) {
-          debug('%s found dep rule %o', this.model.getName(), rule);
 
-          let depAccessMap = await getDependentAccessMap(rule);
-
-          let newRuleVal = null;
-          // Convert rule to boolean value if possible
-          if (depAccessMap.hasAtLeastOneTrueValue()) {
-            newRuleVal = rule.allow;
-
-            // if rules is also deferred
-            if (this.isDeferredRule(rule)) {
-              debug('rule is also deferred');
-              newRuleVal = clone(rule);
-              delete newRuleVal.checkRelation
-            }
-
-            debug('%s dep map has one true value - resolve rule to %o', this.model.getName(), newRuleVal);
-          } else if (depAccessMap.isFails()) {
-            newRuleVal = !rule.allow;
-
-            // if rules is also deferred
-            if (this.isDeferredRule(rule)) {
-              debug('rule is also deferred');
-              newRuleVal = clone(rule);
-              delete newRuleVal.checkRelation;
-              newRuleVal.allow = !newRuleVal.allow;
-            }
-
-            debug('%s: dep map fails - resolve rule to %o', this.model.getName(), newRuleVal);
-          } else {
-            // just put access map to rule
-            rule.accessMap = depAccessMap;
-            debug('%s: cant resolve dep map in place', this.model.getName());
-          }
-
-          if (newRuleVal !== null) {
-            debug('%s: -------\\\----replaced val at index %o - %o', this.model.getName(), index, newRuleVal);
-            val.rules[index] = newRuleVal;
-            recalcProps.add(prop);
-          } else {
-            debug('-----///----- no replace');
-          }
+        if (!this.isDependentRule(rule)) {
+          continue;
         }
+
+        hl('%s found dep rule %o', this.model.getName(), rule);
+
+        let depAccessMap = await getDependentAccessMap(rule);
+
+        let newRuleVal = null;
+        // Convert rule to boolean value if possible
+        if (depAccessMap.hasAtLeastOneTrueValue()) {
+          newRuleVal = rule.allow;
+
+          // if rules is also deferred
+          if (this.isDeferredRule(rule)) {
+            debug('rule is also deferred');
+            newRuleVal = clone(rule);
+            delete newRuleVal.checkRelation
+          }
+
+          debug('%s dep map has one true value - resolve rule to %o', this.model.getName(), newRuleVal);
+        } else if (depAccessMap.isFails()) {
+
+          val.rules[index] = null;
+          recalcProps.add(prop);
+
+          continue;
+        } else {
+          // just put access map to rule
+          rule.accessMap = depAccessMap;
+          debug('%s: cant resolve dep map in place', this.model.getName());
+        }
+
+        if (newRuleVal !== null) {
+          debug('%s: -------\\\----replaced val at index %o - %o', this.model.getName(), index, newRuleVal);
+          val.rules[index] = newRuleVal;
+          recalcProps.add(prop);
+        }
+      }
+
+      // remove null values
+      val.rules = val.rules.filter(rule => rule !== null);
+
+      if (!val.rules.length) {
+        // Nothing to allow. On this stage - we just put false
+        val.rules = [false]
       }
     }
 
