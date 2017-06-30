@@ -1,5 +1,7 @@
 const debug = require('debug')('spikenail:Model');
 const hl = require('debug')('hl');
+const hm = require('debug')('hm');
+const ro = require('debug')('ro');
 
 const clone = require('lodash.clone');
 const isPlainObject = require('lodash.isplainobject');
@@ -862,17 +864,24 @@ export default class Model {
    * @returns {Promise.<void>}
    */
   async handleHasManyACL(result, next, options, _, args, ctx) {
-    debug('%s: handle has many ACL', this.getName());
-    debug('%s: parent data: %j', this.getName(), _);
+
+    ro('%s: handle has many ACL', this.getName());
+    hm('%s: parent data: %j', this.getName(), _);
+
+    ro('%s: hasMany ACL, options: %o', this.getName(), options);
+    ro('%s: hasMany ACL, args: %o', this.getName(), args);
 
     let accessMap = new MongoAccessMap(this, ctx, { action: 'read' }, _);
     await accessMap.init();
 
     // Store access map in the context
-    ctx.accessMap = accessMap;
+    if (!ctx.accessMaps) {
+      ctx.accessMaps = {};
+    }
+    ctx.accessMaps[this.getName()] = accessMap;
 
     if (accessMap.isFails()) {
-      debug('%s: accessMap fails from the beginning', this.getName());
+      ro('%s: accessMap fails from the beginning', this.getName());
       // TODO: all this formatting stuff should not be here
       result.result = {
         edges: null
@@ -883,13 +892,13 @@ export default class Model {
     // We don't need to apply query if we unable to skip whole documents
     // In this case we will handle deps later if needed
     if (accessMap.hasAtLeastOneTrueValue()) {
-      debug('%s: access map has true values, no need to apply query. Next', this.getName());
+      ro('%s: access map has true values, no need to apply query. Next', this.getName());
       return next();
     }
 
     // before building query handle deps if needed
     await accessMap.handleDependencies({
-     [this.getName()]: _
+     [options.parentModelName]: _
     });
 
     // Try to build query as we possibly need it
@@ -897,11 +906,11 @@ export default class Model {
 
     // FIXME: If below is possible that something probably went wrong!
     if (!query) {
-      debug('%s: no query is generated', this.getName());
+      ro('%s: no query is generated', this.getName());
       return next();
     }
 
-    debug('%s: apply query: %o', this.getName(), query);
+    ro('%s: apply query: %o', this.getName(), query);
 
     // Apply query
     options.query = Object.assign(options.query || {}, query);
@@ -928,7 +937,10 @@ export default class Model {
     await accessMap.init();
 
     // Store access map in the context
-    ctx.accessMap = accessMap;
+    if (!ctx.accessMaps) {
+      ctx.accessMaps = {};
+    }
+    ctx.accessMaps[this.getName()] = accessMap;
 
     if (accessMap.isFails()) {
       debug('%s: accessMap fails from the beginning', this.getName());
@@ -1177,21 +1189,24 @@ export default class Model {
    * @param ctx
    */
   async postHandleReadAllACL(result, next, options, _, args, ctx) {
-    debug('%s post handle readAll ACL', this.getName());
+    hm('%s post handle readAll ACL', this.getName());
+
+    let accessMap = ctx.accessMaps ? ctx.accessMaps[this.getName()] : null;
 
     // Skip if no access map defined
-    if (!ctx.accessMap) {
-      debug('%s post handle readAll ACL - no access map skip', this.getName());
+    if (accessMap) {
+      hm('%s post handle readAll ACL - no access map skip', this.getName());
       return next();
     }
 
     // Skip for empty result
     if (!result.result || !result.result.edges || !result.result.edges.length) {
+      hm('%s: empty result - skip', this.getName());
       return next();
     }
 
     // Skip for plain access map with no queries - nothing to do
-    if (ctx.accessMap.isPlain()) {
+    if (accessMap.isPlain()) {
       // FIXME: why we should not apply it. Still different values for different fields
       debug('%s access map is plain skip', this.getName());
       return next();
@@ -1209,14 +1224,14 @@ export default class Model {
     });
 
     // Handle dependencies if needed
-    if (ctx.accessMap.isUnresolved()) {
+    if (accessMap.isUnresolved()) {
       // FIXME: for some reason access map of list is unresolved - it should not be!
       debug('%s: accessMap is unresolved - handle deps', this.getName());
 
-      await ctx.accessMap.handleDependencies({ [this.getName()]: data });
+      await accessMap.handleDependencies({ [this.getName()]: data });
     }
 
-    let filteredData = this.applyAccessMapToData(ctx.accessMap, data);
+    let filteredData = this.applyAccessMapToData(accessMap, data);
 
     debug('filteredData', filteredData);
 
@@ -1950,7 +1965,7 @@ export default class Model {
    */
   async resolveBelongsTo(options, _, args, ctx) {
 
-    debug('belongsTo');
+    ro('resolve belongsTo');
 
     if (!Array.isArray(_)) {
       _ = [_];
@@ -2080,6 +2095,7 @@ export default class Model {
    * @returns {Promise.<void>}
    */
   async processRead(result, next, options, _, args, ctx) {
+    hm('%s: processRead', this.getName());
     // TODO: lets handle it here for now:
     if (options.actionType === 'one') {
       options.method = 'findOne';
@@ -2091,7 +2107,9 @@ export default class Model {
       Object.assign(options.query, { _id: new mongoose.Types.ObjectId(options.id || args.id) });
     }
 
+    hm('%s: before query', this.getName());
     result.result = await this.query.bind(this, options, _, args)();
+    hm('%s: query result: %o', this.getName(), result.result);
     next();
   }
 

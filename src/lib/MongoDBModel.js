@@ -4,6 +4,10 @@ import Model from './Model';
 
 import mongoose from 'mongoose';
 
+const hm = require('debug')('ro');
+
+//const hm = require('debug')('hm');
+
 import {
   fromGlobalId,
 } from 'graphql-relay';
@@ -220,32 +224,42 @@ export default class MongoDBModel extends Model {
    * @param args
    */
   async query(options = {}, _, args) {
-    debug('query init', options);
+    try {
+      hm('query init', options);
 
-    let query = this.argsToConditions(args);
+      let query = this.argsToConditions(args);
 
-    debug('argsToConditions result', query);
+      hm('argsToConditions result', query);
 
-    if (options.query) {
-      // Predefined query should have priority
-      query = Object.assign(options.query, query);
+      if (options.query) {
+        // Predefined query should have priority
+        query = Object.assign(options.query, query);
+      }
+
+      let method = options.method ? options.method : 'find';
+      hm('method', method);
+
+      let cursor = this.model[method](query);
+      cursor.sort(this.argsToSort(args));
+
+      //if (options.type == 'connection') {
+      if (method == 'find') {
+        hm('query, type - connection', args);
+        // something is broken here
+        cursor = connectionFromMongooseQuery(cursor, args);
+      }
+
+      hm('await cursor');
+
+      let res = await cursor;
+
+      hm('query result %o', res);
+
+      return res;
+    } catch(e) {
+      console.error(e);
+      throw e;
     }
-
-    let method = options.method ? options.method : 'find';
-
-    let cursor = this.model[method](query);
-    cursor.sort(this.argsToSort(args));
-
-    //if (options.type == 'connection') {
-    if (method == 'find') {
-      debug('query, type - connection');
-      cursor = connectionFromMongooseQuery(cursor, args);
-    }
-
-    let res = await cursor;
-
-    debug('query result', res);
-    return res;
   }
 
   /**

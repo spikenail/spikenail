@@ -1,4 +1,5 @@
 const debug = require('debug')('spikenail:Spikenail');
+const ro = require('debug')('ro');
 
 import Koa from 'koa';
 import convert from 'koa-convert';
@@ -516,7 +517,7 @@ class Spikenail extends EventEmitter {
 
           // Relay (edges behaviour)
           let Edge = new GraphQLObjectType({
-            // We adding schema.name to avoid same conection from two different models
+            // We adding schema.name to avoid same connection from two different models
             name: schema.name + '_' + prop + 'Edge',
             fields: function() {
               return {
@@ -547,10 +548,11 @@ class Spikenail extends EventEmitter {
             }),
             args: this.models[field.ref].getGraphqlListArgs(),
             resolve: (async function(_, args, ctx) {
-
+              ro('================> HAs many Resolve', schema.name, field);
               let params = {
                 options: {
-                  property: field
+                  property: field,
+                  parentModelName: schema.name
                 },
                 arguments: [...arguments]
               };

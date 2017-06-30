@@ -1,5 +1,6 @@
 const debug = require('debug')('spikenail:MongoAccessMap');
 const hl = require('debug')('hl');
+const ro = require('debug')('ro');
 
 const clone = require('lodash.clone');
 const memoize = require('lodash.memoize');
@@ -194,9 +195,9 @@ export default class MongoAccessMap {
       untrustedData = {};
     }
 
-    hl('%s: ------------ Handle access map dependencies', this.model.getName());
-    hl('%s: data %o', this.model.getName(), data);
-    hl('%s: untrustedData: %o', this.model.getName(), untrustedData);
+    ro('%s: ------------ Handle access map dependencies', this.model.getName());
+    ro('%s: data %o', this.model.getName(), data);
+    ro('%s: untrustedData: %o', this.model.getName(), untrustedData);
     if (this.isFails()) {
       hl('%s: access map fails no need to handle deps', this.model.getName());
       // TODO: What is it?
