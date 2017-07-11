@@ -219,11 +219,25 @@ node(id: ID!): Node
 
 https://facebook.github.io/relay/docs/graphql-object-identification.html#content
 
+Example:
+
+```js
+{
+    node(id: "some-id") {
+        id,
+        ... on Article {
+            title,
+            text
+        }
+    }
+}
+```
+
 #### viewer
 
 Root field
 
-```
+```js
 viewer: viewer
 
 type viewer implements Node {
@@ -234,22 +248,28 @@ type viewer implements Node {
 ```
 
 
-#### Query all items of a specific model
+#### Query all items of a specific model (allXs)
 
 For `Article` model:
 
-```
+```js
 query {
     viewer {
         allArticles() {
-            id, title, text
+            edges {
+            node {
+                id,
+                title,
+                text
+                }
+            }
         }
     }
 }
 ```
 
 
-#### Query single item
+#### Query single item (getX)
 
 Query a specific article by unique field:
 
@@ -261,11 +281,132 @@ query {
 }
 ```
 
-#### Relation queries
+#### Pagination
 
-#### Filtering queries
+Example:
+
+```
+{
+    getArticle(id: "some-id") {
+        id
+        userId
+        user {
+            id
+            name
+        }
+        tags(first: 10, after: "opaqueCursor") {
+            edges {
+                node {
+                    id
+                    name
+                    itemsCount
+                }
+            }
+            pageInfo {
+                hasNextPage
+                hasPreviousPage
+                endCursor
+                startCursor
+            }
+        }
+    }
+}
+
+```
+
+See relay documentation for more details: https://facebook.github.io/relay/graphql/connections.htm
+
+
+#### Filtering and sorting
+
+Example:
+
+```js
+query {
+  viewer {
+    allBoards(filter: { where: { name: { regexp: "^Public" } }, order: "id DESC" }) {
+      edges {
+        node {
+          id
+          userId
+          name
+        }
+      }
+    }
+  }
+}
+```
 
 #### Mutations
+
+##### createX
+
+```js
+mutation createX(input: CreatexInput): CreatexPayload
+```
+
+Example:
+
+```js
+mutation {
+  createItem(input: { name: "New item", clientMutationId: "123" }) {
+    item {
+      id
+      name
+    }
+    clientMutationId
+    errors {
+      message
+      code
+    }
+  }
+}
+```
+
+##### updateX
+
+```js
+mutation updateX(input: UpdatexInput): UpdatexPayload
+```
+
+Example:
+
+```js
+mutation {
+  updateItem(input: { name: "New item name", clientMutationId: "123" }) {
+    item {
+      id
+      name
+    }
+    clientMutationId
+    errors {
+      message
+      code
+    }
+  }
+}
+```
+
+
+##### removeX
+
+```js
+mutation removeX(input: RemovexInput): RemovexPayload
+```
+
+Example:
+
+```js
+mutation {
+  removeItem(input: { id: "Ym9hcmQ6NTkyYmZjOTA2ZjM5Zjc5MGNmNGI5Yjhh" }) {
+    removedId
+    errors {
+      code
+      message
+    }
+  }
+}
+```
 
 ## Creating a Model
 
@@ -292,6 +433,10 @@ properties: {
     return { otherModelField: _.name }
  }
 ```
+
+#### belongsTo relation
+
+
 
 #### MongoDBModel
 
@@ -443,7 +588,7 @@ Then we can define role `member` in model schema:
 roles: {
      member: {
        cond: function(ctx) {
-         return { "members.userId": ctx.currentUser }
+         return { 'members.userId': ctx.currentUser }
        }
      }
    }
@@ -458,8 +603,8 @@ roles: ['member']
 
 #### Access based on another model
 
-In some cases we want to apply rule only if another model satisfies the condition
-There are two ways to do this:
+In some cases we want to apply rule only if another model satisfies the condition.
+We can use checkRelation property for that.
 
 ##### checkRelation
 
@@ -473,30 +618,29 @@ blog: {
 }
 ```
 
-We want allow for `user` to only read a article only if he can read the blog article belongs to:
+We want allow for `user` to read an article only if he can read the blog it belongs to:
 ```
 acls: [{
     allow: false
 }, {
     allow: true,
-    roles: ["user"],
-    actions: ["read"],
-    checkRelation: "blog"
-    checkAction: "read"
+    roles: ['user'],
+    actions: ['read'],
+    checkRelation: {
+        name: 'blog',
+        action: 'read'
+    }
 }]
 ```
 
-checkAction is an optional property. It will match current invoked action by default.
+if checkRelation condition is not satisfied rule will not be applied at all.
+That mean `allow: true` will not become `allow: false` and vice versa. Rule will be filtered out.
 
-##### test
+## TODO
 
-```
-test: "blog"
-```
+GraphQL subscriptions
 
-The access rules for the model will completely depends on rules for the relation `blog`.
-If role X can do action Y on blog, same role can do same action on current model.
-
+Simple endpoint (non-relay)
 
 ## License
 
