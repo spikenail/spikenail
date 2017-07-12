@@ -285,7 +285,7 @@ query {
 
 Example:
 
-```
+```js
 {
     getArticle(id: "some-id") {
         id
@@ -408,7 +408,11 @@ mutation {
 }
 ```
 
-## Creating a Model
+## Defining a Model
+
+### Using model generator
+
+### properties
 
 ### Relations
 
@@ -426,6 +430,17 @@ properties: {
 }
 ```
 
+`authors` definition could be simplified:
+
+```js
+authors: {
+  relation: 'hasMany'
+}
+
+```
+
+In this case framework will try to guess other parameters.
+
 ##### Custom hasMany condition
 
 ```js
@@ -436,6 +451,21 @@ properties: {
 
 #### belongsTo relation
 
+```js
+list: {
+    relation: 'belongsTo'
+    ref: 'list',
+    foreignKey: 'listId'
+}
+```
+
+Simplified definition:
+
+```js
+list: {
+    relation: 'belongsTo'
+}
+```
 
 
 #### MongoDBModel
@@ -460,6 +490,8 @@ Spikenail is based on koa2.
 ### Adding your own koa middlewares
 
 ## Authentication
+
+### Simple token authentication
 
 ## ACL
 

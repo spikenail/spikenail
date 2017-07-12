@@ -620,6 +620,11 @@ class Spikenail extends EventEmitter {
         continue;
       }
 
+      // Skip readOnly fields
+      if (field.readOnly) {
+        continue;
+      }
+
       fields[prop] = this.fieldToGraphqlType(prop, field, schema);
 
       // Just strip all not null for now
