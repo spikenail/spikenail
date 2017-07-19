@@ -1,4 +1,4 @@
-# <img src="logo/logo-title.png" height="800" />
+# <img src="logo/logo-title.png" height="80" />
 
 Spikenail is an open-source Node.js ES7 framework that allows you to build GraphQL API with little or no coding.
 
