@@ -67,7 +67,7 @@ class Spikenail extends EventEmitter {
    * Start the server
    */
   async start() {
-    debug('Starting the server');
+    console.log('Starting the server...');
     try {
       const app = new Koa();
       let router = koaRouter();
@@ -164,7 +164,6 @@ class Spikenail extends EventEmitter {
    */
   bootDataSources(sources) {
     // TODO remove double default
-    console.log('Boot data sources:', sources, sources.default.default.connectionString);
     // TODO: only one data source is currently supported
     return mongoose.connect(sources.default.default.connectionString, { server: { socketOptions: { keepAlive: 1 } } });
   }
