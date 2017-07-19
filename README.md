@@ -1,6 +1,6 @@
-<big><h1 align="center">spikenail</h1></big>
+# <img src="logo/logo-title.png" height="60" />
 
-<big><h1 align="center">WORK IN PROGRESS</h1></big>
+Spikenail is an open-source Node.js ES7 framework that allows you to build GraphQL API with little or no coding.
 
 <p align="center">
   <a href="https://npmjs.org/package/spikenail">
@@ -33,8 +33,6 @@
          alt="License">
   </a>
 </p>
-
-Spikenail is an open-source Node.js ES7 framework that allows you to build GraphQL API with little or no coding.
 
 ## Features
 
