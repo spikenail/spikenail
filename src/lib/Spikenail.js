@@ -8,6 +8,7 @@ import koaRouter from 'koa-router';
 import cors from 'koa-cors';
 
 import mongoose from 'mongoose';
+mongoose.Promise = global.Promise;
 import dataloadersMiddleware from './middlewares/dataloaders';
 import authMiddleware from './middlewares/auth';
 
