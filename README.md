@@ -499,18 +499,23 @@ providerOptions: {
 }
 ```
 
-
-### Adding custom method
-
-## Koa middlewares
-
-Spikenail is based on koa2.
-
-### Adding your own koa middlewares
-
 ## Authentication
 
-### Simple token authentication
+### Simple token authentication middleware
+
+Spikenail has built-in middleware for authentication.
+
+It looks for `tokens` array stored in `User` model in following format:
+
+```
+[{
+    token: "user-random-token"
+}, {
+    token: "user-random-token-2"
+}]
+```
+
+Current user will be placed in context and accessible through `ctx.currentUser`
 
 ## ACL
 
