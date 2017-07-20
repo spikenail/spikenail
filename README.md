@@ -139,11 +139,11 @@ export default new Item({
   acls: [{
     allow: false,
     properties: ['token'],
-    actions: ['*']
+    actions: '*'
   }, {
     allow: true,
     properties: ['token'],
-    actions: [ACTION_CREATE]
+    actions: ['create']
   }]
 });
 ```
