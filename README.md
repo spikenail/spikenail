@@ -153,7 +153,7 @@ export default new Item({
 In spikenail every CRUD action is a set of middlewares.
 These middlewares are not the request middlewares and exists separately.
 
-Default middlewares are:
+Some of default middlewares are:
 
 * Access control middleware
 * Validation middleware
@@ -163,9 +163,9 @@ Default middlewares are:
 
 The whole chain could be changed in any way.
 
-Example of how "Before action" middleware could be overriden:
+For example, you can override "Before action" middleware in following way:
 
-In the model class:
+`models/Item.js`
 
 ```js
 
