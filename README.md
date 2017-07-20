@@ -186,7 +186,7 @@ For example, you can override "Before action" middleware in following way:
 
 ## Configuration
 
-Configuration files are stored under config folder
+Configuration files are stored under `config` folder
 
 ### Data sources
 
@@ -269,9 +269,9 @@ query {
 
 #### Query single item (getX)
 
-Query a specific article by unique field:
+Query a specific item by unique field:
 
-```
+```js
 query {
     getArticle(id: "article-id-1") {
         id, title, text
@@ -410,7 +410,28 @@ mutation {
 
 ### Using model generator
 
-### properties
+You can use model generator in order to simplify model creation:
+
+```
+yo spikenail:model board
+```
+
+This will create models/Board.js file with only id field:
+
+```js
+import { MongoDBModel } from 'spikenail';
+
+class Board extends MongoDBModel {}
+
+export default new Board({
+  name: 'Board',
+  properties: {
+    id: {
+      type: 'id'
+    }
+  }
+});
+```
 
 ### Relations
 
