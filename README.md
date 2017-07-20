@@ -49,6 +49,8 @@ Advanced schema definition: virtual fields, custom resolvers
 
 Validations
 
+Flexibility: easy to adjust or override every part of a framework
+
 ## Install
 
 ```
@@ -578,110 +580,114 @@ acls: [{
 
 #### allow
 
-Each rule must have `allow` property defined. Allow is boolean value
+Each rule must have `allow` property defined. `allow` is boolean value
 that indicates if rule allows something or disallows.
 
 Example:
-```
+
+```js
 allow: true
 ```
 
 #### properties (optional)
 `properties` is an array of properties of model that rule should apply to.
-Omit or use * sign to apply to all rules
+Omit or use * sign to apply to all rules.
 
 #### actions (optional)
 
-Specify what actions rule should be applied to
-There are 4 types of actions:2
+Specify what actions rule should be applied to.
+There are 4 types of actions:
 
 * create
 * update
 * remove
 * read
 
-Omit this property or use * sign to apply to all actions
+Omit this property or use * sign to apply to all actions.
 
 Example:
 
-```
-properties: ['create', 'update']
+```js
+actions: ['create', 'update']
 ```
 
 #### scope
 
-Scope is a mongodb condition. If document match a scope only then rule will be applied.
-
-e.g. `{ isPublic: true }`
-The rule will be applied only to documents that have `isPublic` property equals `true`
-
-Scope might be defined as function
-
-`
-scope: function(ctx) {
-        return { isPublic: true }
-}
-`
-
-This way it will have access to ctx
-
-#### roles
-
-`roles` is an array of roles that rules apply to.
+Scope is a mongodb condition. Rule will be applied only to those documents that match the scope.
 
 Example
 
+```js
+{ isPublic: true }
 ```
-roles: ["anonymous", "member"]
+
+The rule will be applied only to documents that have `isPublic` property equals `true`.
+
+Scope could be defined as a function, in this case you have an access to the context variable:
+
+```js
+scope: function(ctx) {
+    return { isPublic: true }
+}
 ```
 
-Roles might be static or dynamic
+#### roles
 
-##### Static roles
+`roles` is an array of roles that rule should apply to.
 
-Static roles is the roles that not depends on particular document or dataset.
+Example
+
+```js
+roles: ['anonymous', 'member']
+```
+
+Roles might be static or dynamic.
+
+#### Static roles
+
+Static roles are roles that not depends on particular document or data set.
 They calculated once per request for current user.
 
-Built-in roles are
+Built-in static roles are:
 
 * anonymous
 * user
 
-###### Adding your own static roles
+##### Adding your own static roles
 
-Override getStaticRoles function of the model
+Override `getStaticRoles` function of the model.
 
-##### Dynamic roles
+#### Dynamic roles
 
 Dynamic roles are calculated for each particular document.
-For example role `owner` means that `currentUser.id === fetchedDocument.id`
+For example, role `owner` means that `currentUser.id === fetchedDocument.id`
 
-Built-in roles are
+Built-in dynamic roles are:
 
 * owner
 
 ###### Defining dynamic roles
 
-Dynamic roles are defined using `roles` object of model schema
+Dynamic roles are defined using `roles` object of model schema.
 
 For example we want to share some object with other users,
-and put their username into `members` array of the document.
+and put their IDs into `members` array of the document.
 
-Then we can define role `member` in model schema:
+Then we can define role `member` in the model schema:
 
-```
+```js
 roles: {
-     member: {
-       cond: function(ctx) {
-         return { 'members.userId': ctx.currentUser }
-       }
-     }
+ member: {
+   cond: function(ctx) {
+     return { 'members.userId': ctx.currentUser.id }
    }
+ }
+}
 ```
 
 In roles property of acl rule:
 
-```
+```js
 roles: ['member']
 ```
 
@@ -697,14 +703,14 @@ Example:
 
 `Article.js` model has defined belongsTo relation
 
-```
+```js
 blog: {
     relation: "belongsTo"
 }
 ```
 
 We want allow for `user` to read an article only if he can read the blog it belongs to:
-```
+```js
 acls: [{
     allow: false
 }, {
