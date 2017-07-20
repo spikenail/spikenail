@@ -1487,7 +1487,7 @@ export default class Model {
   getRemoveChain() {
     return [
       this.handleRemoveACL,
-      this.validate,
+      //this.validate, TODO: not needed?
       this.beforeRemove,
       this.processRemove,
       this.afterRemove
