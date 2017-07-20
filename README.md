@@ -521,7 +521,12 @@ Current user will be placed in context and accessible through `ctx.currentUser`
 
 ### Introduction
 
-```
+ACL rules are specified under `acls` property of model schema. Rules are processed by framework one by one in natural order.
+By default there is no any access restrictions.
+
+Take a look at below example:
+
+```js
 acls: [{
     allow: false,
     roles: ['*'],
@@ -536,12 +541,29 @@ acls: [{
 }
 ```
 
-ACL rules are specified under `acls` property of model schema
-Rules applies one by one the in natural order priority.
+First rule here is disable everything for everyone:
 
-Rules notation could be simplified and above rules might be written as
-
+```js
+{
+    allow: false,
+    roles: ['*'],
+    actions: ['*']
+}
 ```
+
+Second rule allows everything if `isPublic` property of a item equals `true`.
+
+Rules notation could be simplified and above rules might be written as:
+
+```js
+acls: [{
+    allow: false
+}, {
+    allow: true
+    scope: function() {
+        return { isPublic: true }
+    }
+}
 
 ```
 
