@@ -42,6 +42,13 @@ Native GraphQL support
 
 Relay compatible API
 
+Easy to define access control of any complexity:
+nested relations, scopes, custom dynamic roles
+
+Advanced schema definition: virtual fields, custom resolvers
+
+Validations
+
 ## Install
 
 ```
