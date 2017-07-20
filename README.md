@@ -670,8 +670,18 @@ Built-in dynamic roles are:
 
 Dynamic roles are defined using `roles` object of model schema.
 
-For example we want to share some object with other users,
-and put their IDs into `members` array of the document.
+For example, we have `members` array where sharing information stored in following format:
+
+
+```js
+[{
+    userId: 123
+    role: 'member'
+}, {
+    userId: 456,
+    role: 'observer'
+}]
+```
 
 Then we can define role `member` in the model schema:
 
@@ -679,13 +689,13 @@ Then we can define role `member` in the model schema:
 roles: {
  member: {
    cond: function(ctx) {
-     return { 'members.userId': ctx.currentUser.id }
+     return { 'members': { '$elemMatch': { 'userId': ctx.currentUser.id, role: 'member' } } }
    }
  }
 }
 ```
 
-In roles property of acl rule:
+And use it in the roles property of ACL rule:
 
 ```js
 roles: ['member']
@@ -694,7 +704,7 @@ roles: ['member']
 
 #### Access based on another model
 
-In some cases we want to apply rule only if another model satisfies the condition.
+In some cases we want to apply rule only if another model satisfies some condition.
 We can use checkRelation property for that.
 
 ##### checkRelation
@@ -705,11 +715,12 @@ Example:
 
 ```js
 blog: {
-    relation: "belongsTo"
+    relation: 'belongsTo'
 }
 ```
 
 We want allow for `user` to read an article only if he can read the blog it belongs to:
+
 ```js
 acls: [{
     allow: false
@@ -724,12 +735,12 @@ acls: [{
 }]
 ```
 
-if checkRelation condition is not satisfied rule will not be applied at all.
-That mean `allow: true` will not become `allow: false` and vice versa. Rule will be filtered out.
+If checkRelation condition is not satisfied, rule will not be applied at all.
+It means that `allow: true` will not become `allow: false` and vice versa. Rule will be filtered out.
 
 ## Validations
 
-Usually, data that we receive from users needs to be validated. It is easy to do with spikenail.
+Usually, the data that we receive from users needs to be validated. It is easy to do with spikenail.
 For example, we want `name` to be required property and its length to not exceed 50 characters. 
 This could be done in following way:
 
