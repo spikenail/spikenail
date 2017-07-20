@@ -507,7 +507,7 @@ Spikenail has built-in middleware for authentication.
 
 It looks for `tokens` array stored in `User` model in following format:
 
-```
+```js
 [{
     token: "user-random-token"
 }, {
@@ -691,6 +691,25 @@ acls: [{
 
 if checkRelation condition is not satisfied rule will not be applied at all.
 That mean `allow: true` will not become `allow: false` and vice versa. Rule will be filtered out.
+
+## Validations
+
+Usually, data that we receive from users needs to be validated. It is easy to do with spikenail.
+For example, we want `name` to be required property and its length to not exceed 50 characters. 
+This could be done in following way:
+
+`models/Item.js`
+
+```js
+validations: [{
+  field: 'name',
+  assert: 'required'
+}, {
+  field: 'name',
+  assert: 'maxLength',
+  max: 50
+}]
+```
 
 ## TODO
 
