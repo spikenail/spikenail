@@ -753,7 +753,7 @@ validations: [{
 }]
 ```
 
-## TODO
+## Future plans
 
 GraphQL subscriptions
 
