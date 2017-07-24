@@ -32,6 +32,12 @@ Spikenail is an open-source Node.js ES7 framework that allows you to build Graph
     <img src="https://img.shields.io/npm/l/spikenail.svg?style=flat-square"
          alt="License">
   </a>
+
+  <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=XQKACYYHMX23U">
+      <img src="https://img.shields.io/badge/Donate-PayPal-green.svg?style=flat-square"
+           alt="Donate">
+  </a>
+
 </p>
 
 ## Features
@@ -762,6 +768,10 @@ validations: [{
 GraphQL subscriptions
 
 Simple endpoint (non-relay)
+
+## Support
+
+[![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=XQKACYYHMX23U)
 
 ## License
 
