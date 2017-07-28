@@ -1,6 +1,6 @@
 # <img src="logo/logo-title.png" height="100" />
 
-Spikenail is an open-source Node.js ES7 framework that allows you to build GraphQL API with little or no coding.
+Spikenail is an open-source Node.js ES7 framework which allows you to build GraphQL API with little or no coding.
 
 <p align="center">
   <a href="https://npmjs.org/package/spikenail">
@@ -56,15 +56,15 @@ yo spikenail
 
 ## Core concepts
 
-Ability to build an API just by configuring it is the main idea of spikenail.
-That configuration might include relations, access control, validations and everything else we need.
+An ability to build the API just by configuring is the main idea of Spikenail.
+This configuration might include relations, access control, validations and everything else we need.
 
-At the same time we should provide enough flexibility by allowing to adjust or override every action spikenail does.
-From this point of view, spikenail provides an architecture and default implementation of it.
+At the same time, we should provide enough flexibility by allowing to adjust or override every action Spikenail does.
+From this point of view, Spikenail provides an architecture and a default implementation of it.
 
 The configuration mentioned above stored in models.
 
-Example model `models/Item.js`:
+Example of the model `models/Item.js`:
 
 ```js
 import { MongoDBModel } from 'spikenail';
@@ -72,10 +72,10 @@ import { MongoDBModel } from 'spikenail';
 class Item extends MongoDBModel {
 
   /**
-   * Example of custom method
+   * Example of a custom method
    */
   customMethod() {
-    // Access underlying mongoose model
+    // Access an underlying mongoose model
     return this.model.find({ 'category': 'test' }).limit(10);
   }
 }
@@ -100,7 +100,7 @@ export default new Item({
     },
     virtualField: {
       virtual: true,
-      // Ensure that dependent fields will be queried from the database
+      // Ensure dependent fields to be queried from the database
       dependsOn: ['position'],
       type: String
     },
@@ -155,8 +155,8 @@ export default new Item({
 
 ### CRUD
 
-In spikenail every CRUD action is a set of middlewares.
-These middlewares are not the request middlewares and exists separately.
+In Spikenail every CRUD action is a set of middlewares.
+These middlewares are not the request middlewares and they exists separately.
 
 Some of default middlewares are:
 
@@ -166,9 +166,9 @@ Some of default middlewares are:
 * Process action
 * After action
 
-The whole chain could be changed in any way.
+The whole chain can be changed in any way.
 
-For example, you can override "Before action" middleware in following way:
+For example, you can override "Before action" middleware in a following way:
 
 `models/Item.js`
 
@@ -195,9 +195,9 @@ Configuration files are stored under `config` folder
 
 ### Data sources
 
-Currently, only MongoDB supported.
+Currently, only MongoDB is supported.
 
-It is recommended to store all configuration using environment variables
+It is recommended to store all configurations using environment variables
 
 Example of `config/sources.js`
 
@@ -508,9 +508,9 @@ providerOptions: {
 
 ### Simple token authentication middleware
 
-Spikenail has built-in middleware for authentication.
+Spikenail has built-in middleware for the authentication.
 
-It looks for `tokens` array stored in `User` model in following format:
+It looks for `tokens` array stored in `User` model in a following format:
 
 ```js
 [{
@@ -520,16 +520,16 @@ It looks for `tokens` array stored in `User` model in following format:
 }]
 ```
 
-Current user will be placed in context and accessible through `ctx.currentUser`
+The current user will be placed in context and accessible through `ctx.currentUser`
 
 ## ACL
 
 ### Introduction
 
-ACL rules are specified under `acls` property of model schema. Rules are processed by framework one by one in natural order.
-By default there is no any access restrictions.
+ACL rules are specified under the `acls` property of the model schema. Rules are processed by framework one by one in a natural order.
+There is no any access restrictions by default.
 
-Take a look at below example:
+Take a look at a below example:
 
 ```js
 acls: [{
@@ -546,7 +546,7 @@ acls: [{
 }
 ```
 
-First rule here is disable everything for everyone:
+The first rule here is disable everything for everyone:
 
 ```js
 {
@@ -556,7 +556,7 @@ First rule here is disable everything for everyone:
 }
 ```
 
-Second rule allows everything if `isPublic` property of a item equals `true`.
+The second rule allows everything if `isPublic` property of a item equals `true`.
 
 Rules notation could be simplified and above rules might be written as:
 
@@ -576,8 +576,8 @@ acls: [{
 
 #### allow
 
-Each rule must have `allow` property defined. `allow` is boolean value
-that indicates if rule allows something or disallows.
+Each rule must have the `allow` property defined. `allow` is a boolean value
+that indicates if a rule allows something or disallows.
 
 Example:
 
@@ -586,7 +586,7 @@ allow: true
 ```
 
 #### properties (optional)
-`properties` is an array of properties of model that rule should apply to.
+`properties` is an array of properties of a model that rule should apply to.
 Omit or use * sign to apply to all rules.
 
 #### actions (optional)
@@ -609,7 +609,7 @@ actions: ['create', 'update']
 
 #### scope
 
-Scope is a mongodb condition. Rule will be applied only to those documents that match the scope.
+Scope is a MongoDB condition. Rule will be applied only to those documents that match the scope.
 
 Example
 
@@ -619,7 +619,7 @@ Example
 
 The rule will be applied only to documents that have `isPublic` property equals `true`.
 
-Scope could be defined as a function, in this case you have an access to the context variable:
+Scope can be defined as a function. In this case you have an access to the context variable:
 
 ```js
 scope: function(ctx) {
@@ -641,8 +641,8 @@ Roles might be static or dynamic.
 
 #### Static roles
 
-Static roles are roles that not depends on particular document or data set.
-They calculated once per request for current user.
+Static roles are roles that not depend on a particular document or a data set.
+They are calculated once per a request for a current user.
 
 Built-in static roles are:
 
@@ -651,7 +651,7 @@ Built-in static roles are:
 
 ##### Adding your own static roles
 
-Override `getStaticRoles` function of the model.
+Override the `getStaticRoles` function of the model.
 
 #### Dynamic roles
 
@@ -664,9 +664,9 @@ Built-in dynamic roles are:
 
 ###### Defining dynamic roles
 
-Dynamic roles are defined using `roles` object of model schema.
+Dynamic roles are defined using `roles` object of the model schema.
 
-For example, we have `members` array where sharing information stored in following format:
+For example, we have `members` array where sharing information stored in a following format:
 
 
 ```js
@@ -679,7 +679,7 @@ For example, we have `members` array where sharing information stored in followi
 }]
 ```
 
-Then we can define role `member` in the model schema:
+Then we can define a role `member` in the model schema:
 
 ```js
 roles: {
@@ -701,7 +701,7 @@ roles: ['member']
 #### Access based on another model
 
 In some cases we want to apply rule only if another model satisfies some condition.
-We can use checkRelation property for that.
+We can use the checkRelation property for that.
 
 ##### checkRelation
 
@@ -731,12 +731,12 @@ acls: [{
 }]
 ```
 
-If checkRelation condition is not satisfied, rule will not be applied at all.
+If checkRelation condition is not satisfied, the rule will not be applied at all.
 It means that `allow: true` will not become `allow: false` and vice versa. Rule will be filtered out.
 
 ## Validations
 
-Usually, the data that we receive from users needs to be validated. It is easy to do with spikenail.
+Usually the data that we receive from users needs to be validated. It is easy to do with Spikenail.
 For example, we want `name` to be required property and its length to not exceed 50 characters. 
 This could be done in following way:
 
