@@ -47,6 +47,11 @@ Validations
 
 Flexibility: easy to adjust or override every part of a framework
 
+## Examples
+
+Creating Trello-like API:
+https://medium.com/@igor3489_46897/creating-advanced-graphql-api-quickly-using-spikenail-80ce6fd675ab
+
 ## Install
 
 ```
