@@ -395,6 +395,9 @@ mutation {
 }
 ```
 
+#### Subscriptions
+
+WIP
 
 ##### removeX
 

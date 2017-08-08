@@ -343,9 +343,14 @@ class Spikenail extends EventEmitter {
       fields: () => (queryFields)
     });
 
+    // let RootSubscription = new GraphQLObjectType({
+    //   name: 'Subscription'
+    // });
+
     let finalSchema = new GraphQLSchema({
       query: RootQuery,
-      mutation: RootMutation
+      mutation: RootMutation,
+      //subscription: RootSubscription
     });
 
     return finalSchema;
