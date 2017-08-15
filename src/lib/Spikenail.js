@@ -19,6 +19,12 @@ import { EventEmitter } from 'events';
 
 import requireAll from 'require-all';
 
+// temp
+import { PubSub } from 'graphql-subscriptions';
+const pubsub = new PubSub();
+// temp \\
+
+
 import {
   GraphQLObjectType,
   GraphQLList,
@@ -303,7 +309,8 @@ class Spikenail extends EventEmitter {
       };
     }
 
-    // Create mutations
+    // Create mutations and subscriptions
+    let subscriptionFields = {};
     let mutationFields = {};
     for (const className of Object.keys(models)) {
 
@@ -320,6 +327,11 @@ class Spikenail extends EventEmitter {
         this.buildCRUDMutation('create', model, modelTypes, viewer),
         this.buildCRUDMutation('update', model, modelTypes, viewer),
         this.buildCRUDMutation('remove', model, modelTypes, viewer)
+      );
+
+      subscriptionFields = Object.assign(
+        subscriptionFields,
+        this.buildSubscription(model, modelTypes)
       );
     }
 
@@ -343,9 +355,10 @@ class Spikenail extends EventEmitter {
       fields: () => (queryFields)
     });
 
-    // let RootSubscription = new GraphQLObjectType({
-    //   name: 'Subscription'
-    // });
+    let RootSubscription = new GraphQLObjectType({
+      name: 'Subscription',
+      fields: () => (subscriptionFields)
+    });
 
     let finalSchema = new GraphQLSchema({
       query: RootQuery,
@@ -354,6 +367,37 @@ class Spikenail extends EventEmitter {
     });
 
     return finalSchema;
+  }
+
+  /**
+   * Build subscription type
+   * TODO: WIP
+   *
+   * @param model
+   * @param modelTypes
+   * @returns {{}}
+   */
+  buildSubscription(model, modelTypes) {
+    let subscriptionName = 'subscribeTo' + capitalize(model.getName());
+
+    let subscription = {
+      type: new GraphQLObjectType({
+        name: subscriptionName,
+        fields: () => ({
+          mutation: { type: GraphQLString },
+          node: {
+            type: modelTypes[model.getName()]
+          }
+        })
+      }),
+      resolve: () => {
+        subscribe: () => pubsub.asyncIterator(model.getName())
+      }
+    };
+
+    return {
+      [subscriptionName]: subscription
+    }
   }
 
   /**
@@ -631,6 +675,12 @@ class Spikenail extends EventEmitter {
       }
 
       fields[prop] = this.fieldToGraphqlType(prop, field, schema);
+
+      // TODO: quickfix. As globalId has resolver, we need to strip it to avoid:
+      // TODO: "field type has a resolve property, but Input Types cannot define resolvers."
+      if (fields[prop].resolve) {
+        delete fields[prop].resolve;
+      }
 
       // Just strip all not null for now
       // TODO: quickfix ? don't

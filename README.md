@@ -397,7 +397,9 @@ mutation {
 
 #### Subscriptions
 
-WIP
+##### subscribeToX
+
+
 
 ##### removeX
 
