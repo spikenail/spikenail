@@ -1038,8 +1038,8 @@ export default class MongoAccessMap {
       }
 
       // calculate unique rule set hash
-      // FIXME: make another unique check. possible circular issues? concat ids of rules
-      let hash = this.toHash(ruleSet);
+      let hash = ruleSet.rules.reduce((a, b) => a + b.id, '');
+      //let hash = this.toHash(ruleSet);
 
       // we should convert rule set to query only once
       if (queries[hash]) {

@@ -7,6 +7,7 @@ const clone = require('lodash.clone');
 const isPlainObject = require('lodash.isplainobject');
 
 import pluralize from 'pluralize';
+import capitalize from 'lodash.capitalize';
 
 const md5 = require('md5');
 
@@ -19,6 +20,10 @@ import mongoose from 'mongoose';
 import ValidationService from './services/Validation/ValidationService';
 
 import MongoAccessMap from './AccessMap/MongoAccessMap';
+
+import Spikenail from './Spikenail';
+
+import PubSubService from './services/PubSub/PubSubService';
 
 import {
   GraphQLObjectType,
@@ -171,7 +176,9 @@ export default class Model {
   /**
    * After update
    */
-  afterUpdate() {}
+  afterUpdate(result, next) {
+    next();
+  }
 
   /**
    * Process update
@@ -780,7 +787,8 @@ export default class Model {
       this.validate,
       this.beforeUpdate,
       this.processUpdate,
-      this.afterUpdate
+      this.afterUpdate,
+      this.publishUpdate
     ]
   }
 
@@ -795,7 +803,8 @@ export default class Model {
       //this.validate, TODO: not needed?
       this.beforeRemove,
       this.processRemove,
-      this.afterRemove
+      this.afterRemove,
+      //this.publishRemove
     ]
   }
 
@@ -1144,5 +1153,168 @@ export default class Model {
    */
   async afterRead(result, next, options, _, args, ctx) {
     next();
+  }
+
+  /**
+   * Publish update middleware
+   * TODO: WIP
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async publishUpdate(result, next, options, _, args, ctx) {
+    hm('publishUpdate', result);
+
+    let topics = await this.getTopics(result.result);
+    for (let topic of topics) {
+      // Publish
+      hm('Publish to', topic);
+      // use driver that will concatenate topic
+    }
+
+    let channel = 'subscribeTo' + capitalize(this.getName());
+    hm('publish to %s', channel);
+
+    await PubSubService.publish(channel, { [channel]: result.result });
+    next();
+  }
+
+  /**
+   * Get topics
+   * TODO: we need to actively use cache in order to avoid fetching same items twice
+   *
+   * @param result
+   *
+   * @returns {Promise.<void>}
+   */
+  async getTopics(result) {
+    // TODO: always add scope to topics in order to allow subscribing */list/1 even if it is under some categories
+
+    let topics = [];
+
+    let maxTopicDepth = this.schema.maxTopicDepth;
+
+    let depth = 1;
+
+    /**
+     * Recursively build topics tree
+     *
+     * @param model
+     * @param item
+     * @param fetch if need to fetch item using item.id
+     * @param parentName
+     * @returns {Promise.<{}>}
+     */
+    let recursive = async function(model, item, fetch, parentName) {
+      hm('recursive start');
+
+      let tree = {};
+      tree.name = [model.getName(), item.id]; // card, 123
+      tree.topic = tree.name;
+
+      // Concat topic
+      if (parentName && parentName.length) {
+        tree.topic = tree.topic.concat(parentName);
+      }
+
+      hm('tree name', tree.name);
+      hm('item %o', item);
+
+      // e.g. Card, item = resulting item
+      let rels = model.getBelongsToRelations();
+
+      // If no rels or reached max depth
+      if (!rels.length || (depth === maxTopicDepth)) {
+        hm('end of subtree');
+        // TODO: push complete topic - as it is final target
+        topics.push(tree.topic);
+        return tree;
+      }
+
+      // Increase depth
+      depth++;
+
+      // If rels exists - create tree for each rel
+      tree.children = [];
+      for (let rel of rels) {
+        hm('iterating rel %o', rel);
+        let relModelName = rel.ref;
+        let relModel = Spikenail.models[relModelName];
+
+        let relItemId = item[rel.foreignKey];
+
+        // Fetch item if needed. Only id of item could be provided
+        hm('fetch', fetch, relItemId);
+        if (fetch) {
+          hm('need to fetch full item first', item.id);
+          // Fetch full item
+          let fullItem = await model.model.findById(
+            new mongoose.Types.ObjectId(item.id)
+          );
+
+          hm('fullItem', fullItem);
+          relItemId = fullItem[rel.foreignKey];
+
+          hm('item fetched - new relItemId is', relItemId)
+        }
+
+        // If no foreign key specified
+        if (!relItemId) {
+          hm('no ID found using FK, go to next rel', item.id);
+          continue;
+        }
+
+        // Create another tree
+        let branch = {
+          // modelName, id - e.g. list, 567
+          name: [relModelName, relItemId]
+        };
+
+        // We are not fetching relItem here. May be not need it - if no rels.
+        // Add nested branch
+        branch = await recursive(relModel, { id: relItemId }, true, tree.topic);
+        tree.children.push(branch);
+      }
+
+      return tree;
+    };
+
+    // TODO: for some reason we don't have full item at the beginning
+    // TODD: we need to actively use cache in order to avoid fetching same items twice
+    let tree = await recursive(this, result, true);
+
+    hm('final topics tree %o', tree);
+
+    hm('final topics %o', topics);
+
+    return topics;
+  }
+
+  /**
+   * Returns topic depth
+   * @returns {*|number}
+   */
+  getTopicDepth() {
+    return this.schema.topicDepth || 3;
+  }
+
+  /**
+   * Get belongsTo relations of current model
+   */
+  getBelongsToRelations() {
+    let rels = [];
+    // TODO: optimize
+    Object.values(this.publicProperties).forEach(prop => {
+      if (prop.relation && prop.relation === 'belongsTo') {
+        rels.push(prop);
+      }
+    });
+
+    return rels;
   }
 }

@@ -3,9 +3,12 @@ const ro = require('debug')('ro');
 
 import Koa from 'koa';
 import convert from 'koa-convert';
-import graphqlHTTP from 'koa-graphql';
+
+import { graphqlKoa, graphiqlKoa } from 'graphql-server-koa';
+
 import koaRouter from 'koa-router';
 import cors from 'koa-cors';
+import koaBody from 'koa-bodyparser';
 
 import mongoose from 'mongoose';
 mongoose.Promise = global.Promise;
@@ -19,10 +22,13 @@ import { EventEmitter } from 'events';
 
 import requireAll from 'require-all';
 
-// temp
-import { PubSub } from 'graphql-subscriptions';
-const pubsub = new PubSub();
-// temp \\
+import { withFilter } from 'graphql-subscriptions';
+
+import PubSubService from './services/PubSub/PubSubService';
+
+import { createServer } from 'http';
+import { SubscriptionServer } from 'subscriptions-transport-ws';
+import { execute, subscribe } from 'graphql';
 
 
 import {
@@ -86,17 +92,26 @@ class Spikenail extends EventEmitter {
       if (Object.keys(this.models).length) {
         this.graphqlSchema = this.createGraphqlSchema(this.models);
 
-        // Set default graphql route
-        router.all('/graphql', convert(graphqlHTTP({
-          schema: this.graphqlSchema,
-          graphiql: true
-        })));
+        router.all('/graphql',
+          (context, next) => graphqlKoa({
+            schema: this.graphqlSchema,
+            context,
+          })(context, next),
+        );
+
+        router.get('/graphiql', graphiqlKoa({
+          endpointURL: '/graphql',
+          subscriptionsEndpoint: `ws://localhost:8000/graphql`
+        }));
+
       } else {
         debug('No models loaded');
       }
 
       app
+        .use(koaBody())
         .use(convert(cors()))
+        .use(router.allowedMethods())
         .use(authMiddleware())
         .use(dataloadersMiddleware())
         .use(router.routes());
@@ -111,6 +126,33 @@ class Spikenail extends EventEmitter {
         }
         console.log('Server is listening on port 5000');
       });
+
+      // Start the websocket server
+      // Create WebSocket listener server
+      const websocketServer = createServer((request, response) => {
+        response.writeHead(404);
+        response.end();
+      });
+
+      // Bind it to port and start listening
+      websocketServer.listen(8000, () => console.log(
+        `Websocket Server is now running on http://localhost:8000`
+      ));
+
+      const subscriptionServer = SubscriptionServer.create(
+        {
+          schema: this.graphqlSchema,
+          execute,
+          subscribe,
+        },
+        {
+          server: websocketServer,
+          path: '/graphql',
+        },
+      );
+
+      this.subscriptionServer = subscriptionServer;
+
     } catch (err) {
       console.error(err);
     }
@@ -363,7 +405,7 @@ class Spikenail extends EventEmitter {
     let finalSchema = new GraphQLSchema({
       query: RootQuery,
       mutation: RootMutation,
-      //subscription: RootSubscription
+      subscription: RootSubscription
     });
 
     return finalSchema;
@@ -379,6 +421,7 @@ class Spikenail extends EventEmitter {
    */
   buildSubscription(model, modelTypes) {
     let subscriptionName = 'subscribeTo' + capitalize(model.getName());
+    //let topic = model.getName();
 
     let subscription = {
       type: new GraphQLObjectType({
@@ -390,8 +433,8 @@ class Spikenail extends EventEmitter {
           }
         })
       }),
-      resolve: () => {
-        subscribe: () => pubsub.asyncIterator(model.getName())
+      subscribe: () => {
+        return PubSubService.asyncIterator(subscriptionName);
       }
     };
 
