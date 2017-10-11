@@ -35,6 +35,7 @@ import {
 import GraphQLJSON from 'graphql-type-json';
 
 import pluralize from 'pluralize';
+import capitalize from 'lodash.capitalize';
 
 const md5 = require('md5');
 
@@ -47,6 +48,9 @@ const isPlainObject = require('lodash.isplainobject');
 
 import connectionFromMongooseQuery from './components/RelayMongooseConnection';
 
+import DataLoader from 'dataloader';
+
+import Spikenail from './Spikenail';
 
 /**
  * MongoDB Spikenail model
@@ -344,6 +348,37 @@ export default class MongoDBModel extends Model {
   }
 
   /**
+   * Check if key is global key
+   *
+   * @param k
+   * @returns {boolean}
+   */
+  isGlobalKey(k) {
+    let prop = this.publicProperties[k];
+
+    if (!prop) {
+      return false;
+    }
+
+    if (prop.type === 'id') {
+      return true;
+    }
+
+    return false
+  }
+
+  /**
+   * Convert global key to mongo id
+   *
+   * @param val
+   * @returns {*}
+   */
+  globalKeyToMongoId(val) {
+    // TODO: try catch if incorrect id passed
+    return new mongoose.Types.ObjectId(fromGlobalId(val).id);
+  }
+
+  /**
    * Builds mongodb where
    *
    * @param where
@@ -351,9 +386,9 @@ export default class MongoDBModel extends Model {
    */
   buildWhere(where) {
     debug('buildWhere', where);
+    let query = {};
     try {
       let self = this;
-      let query = {};
       if (where === null || (typeof where !== 'object')) {
         return query;
       }
@@ -362,7 +397,11 @@ export default class MongoDBModel extends Model {
       let idName = 'id';
 
       Object.keys(where).forEach(function (k) {
+
         let cond = where[k];
+
+        let isGlobalKey = self.isGlobalKey(k);
+
         if (k === 'and' || k === 'or' || k === 'nor') {
           if (Array.isArray(cond)) {
             cond = cond.map(function (c) {
@@ -399,15 +438,19 @@ export default class MongoDBModel extends Model {
           } else if (spec === 'inq') {
             query[k] = {
               $in: cond.map(function (x) {
-                if ('string' !== typeof x) return x;
-                return new mongoose.Types.ObjectId(x);
+                if (isGlobalKey) {
+                  return self.globalKeyToMongoId(x);
+                }
+                return x;
               }),
             };
           } else if (spec === 'nin') {
             query[k] = {
               $nin: cond.map(function (x) {
-                if ('string' !== typeof x) return x;
-                return new mongoose.Types.ObjectId(x);
+                if (isGlobalKey) {
+                  return self.globalKeyToMongoId(x);
+                }
+                return x;
               }),
             };
           } else if (spec === 'like') {
@@ -431,6 +474,10 @@ export default class MongoDBModel extends Model {
             // Null: 10
             query[k] = {$type: 10};
           } else {
+            if (isGlobalKey) {
+              cond = self.globalKeyToMongoId(cond);
+            }
+
             query[k] = cond;
           }
         }
@@ -1035,7 +1082,8 @@ export default class MongoDBModel extends Model {
 
       // check if doc is all null values document - return null then
       let isAllNull = true;
-      let plainNode = doc.toObject();
+      // If doc is mongodb model - convert it to object
+      let plainNode = doc.toObject ? doc.toObject() : doc;
       for (let key of Object.keys(plainNode)) {
         if (accessMap.accessMap[key] === undefined) {
           continue;
@@ -1293,5 +1341,272 @@ export default class MongoDBModel extends Model {
     result.result = await this.query.bind(this, options, _, args)();
     hm('%s: query result: %o', this.getName(), result.result);
     next();
+  }
+
+  /**
+   * Publish update middleware
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async publishUpdate(result, next, options, _, args, ctx) {
+    hm('publishUpdate', result);
+
+    if (!Spikenail.pubsub) {
+      hm('No pubsub enabled')
+      return next();
+    }
+
+    // Fetch full item
+    // TODO: use cache
+    // TODO: fetch additional data if needed for complex ACL check
+    let fullItem = await this.model.findById(
+      new mongoose.Types.ObjectId(result.result.id)
+    );
+
+    // Workaround for mongodb. As we publish messages in plain objects.
+    fullItem = fullItem.toObject();
+    fullItem.id = fullItem._id;
+
+    let topics = await this.getTopics(result.result);
+    for (let topic of topics) {
+      // Publish
+      hm('Publish to', topic);
+
+      let subscription = 'subscribeTo' + capitalize(this.getName());
+      hm('publish for subscription %s', subscription);
+
+      let mutation = 'update';
+
+      // spikenail — namespace,
+      // this.getName() is - workaround for redis pubsub. Allowing to subscribe only to board items like *.board.*.board
+      // avoiding subscription to nested items: board.123.list.567.list
+      // board.123.list.*.list - all lists of board 123
+      await Spikenail.pubsub.publish(['spikenail', mutation, ...topic, this.getName()], {
+        [subscription]: {
+          mutation: mutation,
+          node: fullItem
+        }
+      });
+    }
+
+    next();
+  }
+
+  /**
+   * Subscribe
+   *
+   * @param _
+   * @param args
+   * @param context
+   * @param info
+   */
+  subscribe(_, args, context, info) {
+    hm('subscribe', _, args, context);
+
+    // Always starts from * for handling cases like we want to subscribe on cards: user/123/board/123/lists/123/card
+    // TODO: could be optimized for known single level items
+    let path = ['*'];
+
+    let id = null;
+    if (args.filter && args.filter.where) {
+      let where = args.filter.where;
+
+      // Optimize by id
+      if (where.id) {
+        id = fromGlobalId(where.id).id;
+      }
+      // Check relations and optimize
+      // TODO
+    }
+
+    path.push(this.getName());
+
+    // If specific item updates
+    if (id) {
+      hm('specific item subscription:', id);
+      path.push(id);
+    } else {
+      hm('all items subscription');
+      path.push('*');
+    }
+
+    // Workaround for redis
+    path.push(this.getName());
+
+    let topic = Spikenail.pubsub.pathToSubscriptionChannel(path);
+
+    hm('subscribed to:', topic);
+
+    return Spikenail.pubsub.pubsub.asyncIterator(topic);
+  }
+
+  /**
+   * PubSub Messages filter, including ACL check.
+   * Returns true if user can receive message and false if not
+   *
+   * @param payload
+   * @param args
+   * @param ctx
+   *
+   * @return boolean | Promise<boolean>
+   */
+  async messagesFilter(payload, args, ctx) {
+    try {
+      hm('messagesFilter', payload, args);
+
+      if (!payload) {
+        hm('No payload');
+        // looks like it is invoked with empty payload when we open graphiql
+        // {"type":"connection_init","payload":{}} ?
+        // Just return true for now
+        return true;
+      }
+
+      // Use sift to apply where to payload
+      // TODO: we need to have an ability of extracting ids from global ids
+      let query = this.argsToConditions(args);
+
+      hm('filter to query', query);
+
+      let data = payload[Object.keys(payload)[0]];
+      let node = data.node;
+
+      if (Object.keys(query)) {
+        let siftResult = sift(query, [data.node]);
+
+        if (!siftResult.length) {
+          hm('Sift fails. Skip');
+          return false;
+        }
+      }
+
+      hm('Sift Pass');
+
+      // Apply ACL check
+      // TODO: it is copypaste from readone ACL
+      // TODO: access check often requires to fetch additional data.
+      // TODO It could be optimized by prefetching it on publish step
+      let accessMap = new MongoAccessMap(this, ctx, {action: 'read'});
+
+      await accessMap.init();
+
+      if (accessMap.isFails()) {
+        debug('%s: messageFilter ACL, access map fails', this.getName());
+        return false;
+      }
+
+      // Handle dependencies if needed
+      // FIXME: will always be unresolved even it does not have dependencies
+      if (accessMap.isUnresolved()) {
+        debug('%s: accessMap is unresolved - handle deps', this.getName());
+        await accessMap.handleDependencies({}, {[this.getName()]: [node]});
+      }
+
+      accessMap.buildRuleSetQueries();
+
+      // FIXME: always applies, but should not in some cases
+      let resultData = this.applyAccessMapToData(accessMap, [node]);
+
+      debug('%s resultData %o', this.getName(), resultData);
+
+      let result = resultData[0] || null;
+
+      // FIXME: it is fast workaround - see readAll postACL to perform correct check
+      if (result && result._id === null) {
+        return false;
+      }
+
+      // TODO: support filtering by mutation - may be not here but include mutation in topic
+
+      ctx.filteredData = result;
+
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
+  }
+
+  /**
+   * Subscription resolve
+   *
+   * @param params
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async resolveSubscription(params, _, args, ctx) {
+    // TODO: it should be very similar to readOne. So it make sense to have the same middleware chain with before after
+
+    // Check for filtered data. If specified, replace it.
+    // TODO: looks like kind of workaround, as we forced to do ACL check on filter step
+    // TODO: we can just pick accessMap from ctx and perform applyAccessMapToData here, instead of passing all data
+    if (ctx.filteredData) {
+      _[Object.keys(_)[0]].node = ctx.filteredData;
+    }
+
+    // TODO: not sure why it works that way - why not just return the payload
+    return _[Object.keys(_)[0]];
+  }
+
+  /**
+   * Get DataLoader from context. Create if not exists
+   *
+   * @param ctx
+   * @param type
+   */
+  getDataLoaderFromContext(ctx, type) {
+
+    if (!ctx.dataLoaders) {
+      ctx.dataLoaders = [];
+    }
+
+    let dataLoaderName;
+
+    // Single item
+    if (!type) {
+      dataLoaderName = this.getName();
+
+      if (ctx.dataLoaders[dataLoaderName]) {
+        return ctx.dataLoaders[dataLoaderName];
+      }
+
+      ctx.dataLoaders[dataLoaderName] = new DataLoader(async function(ids) {
+        let result = await this.query({ query: {_id: { '$in': ids }} });
+        return result.length ? result : [null];
+      });
+    }
+
+    // Has many
+    if (type === 'hasMany') {
+      dataLoaderName = this.getName() + 'HasManyLoader';
+
+      if (ctx.dataLoaders[dataLoaderName]) {
+        return ctx.dataLoaders[dataLoaderName];
+      }
+
+      // Batch hasManyResolvers
+      ctx.dataLoaders[dataLoaderName] = new DataLoader(this.batchLoadHasMany.bind(this), { cache: false });
+    }
+
+    // Belongs to
+    if (type === 'belongsTo') {
+      dataLoaderName = this.getName() + 'BelongsToLoader';
+
+      if (ctx.dataLoaders[dataLoaderName]) {
+        return ctx.dataLoaders[dataLoaderName];
+      }
+
+      ctx.dataLoaders[dataLoaderName] = new DataLoader(this.batchBelongsTo.bind(this), { cache: false });
+    }
+
+    return ctx.dataLoaders[dataLoaderName];
   }
 }

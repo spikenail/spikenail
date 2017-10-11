@@ -12,7 +12,7 @@ import koaBody from 'koa-bodyparser';
 
 import mongoose from 'mongoose';
 mongoose.Promise = global.Promise;
-import dataloadersMiddleware from './middlewares/dataloaders';
+
 import authMiddleware from './middlewares/auth';
 
 import pluralize from 'pluralize';
@@ -23,8 +23,6 @@ import { EventEmitter } from 'events';
 import requireAll from 'require-all';
 
 import { withFilter } from 'graphql-subscriptions';
-
-import PubSubService from './services/PubSub/PubSubService';
 
 import { createServer } from 'http';
 import { SubscriptionServer } from 'subscriptions-transport-ws';
@@ -113,19 +111,14 @@ class Spikenail extends EventEmitter {
         .use(convert(cors()))
         .use(router.allowedMethods())
         .use(authMiddleware())
-        .use(dataloadersMiddleware())
         .use(router.routes());
 
       this.app = app;
 
       await this.boot();
 
-      this.server = this.app.listen(5000, (err) => {
-        if (err) {
-          throw err;
-        }
-        console.log('Server is listening on port 5000');
-      });
+      this.server = await this.app.listen(5000);
+      console.log('Server is listening on port 5000');
 
       // Start the websocket server
       // Create WebSocket listener server
@@ -203,6 +196,26 @@ class Spikenail extends EventEmitter {
         console.error(e);
         throw e;
       }
+    }
+
+    await this.bootPubSub();
+
+  }
+
+  /**
+   * Boot pubsub engine
+   *
+   * @returns {Promise.<void>}
+   */
+  async bootPubSub() {
+    const appDir = process.cwd();
+    try {
+      let config = require(appDir + '/config/pubsub.js').default.pubsub;
+      let pubsub = require(appDir + '/node_modules/spikenail-pubsub-' + config.adapter).PubSub;
+      this.pubsub = new pubsub(config.connection || {});
+    } catch (e) {
+      console.error(e);
+      debug('Can not load config/pubsub.js');
     }
   }
 
@@ -413,7 +426,7 @@ class Spikenail extends EventEmitter {
 
   /**
    * Build subscription type
-   * TODO: WIP
+   * TODO: socket does not pass auth token so we does not have auth context
    *
    * @param model
    * @param modelTypes
@@ -421,7 +434,12 @@ class Spikenail extends EventEmitter {
    */
   buildSubscription(model, modelTypes) {
     let subscriptionName = 'subscribeTo' + capitalize(model.getName());
-    //let topic = model.getName();
+
+    // TODO: workaround for passing ctx and other args
+    const filtered = (asyncIteratorFn, filter) => withFilter(
+      asyncIteratorFn,
+      filter,
+    );
 
     let subscription = {
       type: new GraphQLObjectType({
@@ -433,9 +451,17 @@ class Spikenail extends EventEmitter {
           }
         })
       }),
-      subscribe: () => {
-        return PubSubService.asyncIterator(subscriptionName);
-      }
+      resolve: (function(_, args) {
+        let params = {};
+        return model.resolveSubscription(params, ...arguments);
+      }).bind(this),
+      args: model.getGraphqlSubscriptionArgs(),
+      subscribe: (_, args, ctx, info) => filtered(
+        model.subscribe.bind(model, _, args, ctx, info),
+        (payload, variables) => {
+          return model.messagesFilter(payload, args, ctx);
+        }
+      )()
     };
 
     return {
@@ -660,7 +686,7 @@ class Spikenail extends EventEmitter {
                 }, ...arguments);
               }
 
-              return await ctx.dataLoaders[this.models[field.ref].getName() + 'HasManyLoader'].load(params);
+              return await this.models[field.ref].getDataLoaderFromContext(ctx, 'hasMany').load(params);
 
             }).bind(this)
           };
@@ -678,7 +704,7 @@ class Spikenail extends EventEmitter {
                 arguments: [...arguments]
               };
 
-              return await ctx.dataLoaders[this.models[field.ref].getName() + 'BelongsToLoader'].load(params);
+              return await this.models[field.ref].getDataLoaderFromContext(ctx, 'belongsTo').load(params);
 
             }).bind(this)
           }

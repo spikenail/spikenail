@@ -23,8 +23,6 @@ import MongoAccessMap from './AccessMap/MongoAccessMap';
 
 import Spikenail from './Spikenail';
 
-import PubSubService from './services/PubSub/PubSubService';
-
 import {
   GraphQLObjectType,
   GraphQLString,
@@ -939,6 +937,25 @@ export default class Model {
   }
 
   /**
+   * Subscription args
+   *
+   * @returns {{filter: {name: string, type: *}}}
+   */
+  getGraphqlSubscriptionArgs() {
+    return {
+      // Custom filter
+      filter: {
+        name: 'filter',
+        type: GraphQLJSON
+      },
+      // id: {
+      //   name: 'id',
+      //   type: GraphQLString
+      // }
+    }
+  }
+
+  /**
    * Single item query arguments
    */
   getGraphqlItemArgs() {
@@ -1157,7 +1174,6 @@ export default class Model {
 
   /**
    * Publish update middleware
-   * TODO: WIP
    *
    * @param result
    * @param next
@@ -1168,21 +1184,40 @@ export default class Model {
    * @returns {Promise.<void>}
    */
   async publishUpdate(result, next, options, _, args, ctx) {
-    hm('publishUpdate', result);
-
-    let topics = await this.getTopics(result.result);
-    for (let topic of topics) {
-      // Publish
-      hm('Publish to', topic);
-      // use driver that will concatenate topic
-    }
-
-    let channel = 'subscribeTo' + capitalize(this.getName());
-    hm('publish to %s', channel);
-
-    await PubSubService.publish(channel, { [channel]: result.result });
     next();
   }
+
+  /**
+   * Subscribe
+   *
+   * @param _
+   * @param args
+   * @param context
+   * @param info
+   */
+  async subscribe(_, args, context, info) {}
+
+  /**
+   * PubSub Messages filter, including ACL check. Return true if user can receive message and false if not
+   *
+   * @param payload
+   * @param args
+   * @param ctx
+   */
+  messagesFilter(payload, args, ctx) {
+    return true;
+  }
+
+  /**
+   * Resolve data that requested by subscribe query to be returned back
+   *
+   * @param params
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async resolveSubscription(params, _, args, ctx) {}
 
   /**
    * Get topics
@@ -1317,4 +1352,13 @@ export default class Model {
 
     return rels;
   }
+
+  /**
+   * Get DataLoader from context. Create if not exists
+   *
+   * @param ctx
+   * @param type
+   */
+  getDataLoaderFromContext(ctx, type) {}
+
 }
