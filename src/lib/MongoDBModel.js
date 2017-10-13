@@ -5,7 +5,7 @@ import Model from './Model';
 import mongoose from 'mongoose';
 
 const hl = require('debug')('hl');
-const hm = require('debug')('ro');
+const hm = require('debug')('hm');
 const ro = require('debug')('ro');
 
 import ValidationService from './services/Validation/ValidationService';
@@ -1357,10 +1357,7 @@ export default class MongoDBModel extends Model {
   async publishUpdate(result, next, options, _, args, ctx) {
     hm('publishUpdate', result);
 
-    if (!Spikenail.pubsub) {
-      hm('No pubsub enabled')
-      return next();
-    }
+    let mutation = 'update';
 
     // Fetch full item
     // TODO: use cache
@@ -1373,7 +1370,63 @@ export default class MongoDBModel extends Model {
     fullItem = fullItem.toObject();
     fullItem.id = fullItem._id;
 
-    let topics = await this.getTopics(result.result);
+    await this.publishData({
+      node: fullItem,
+      mutation: mutation
+    }, fullItem, mutation);
+
+    next();
+  }
+
+  /**
+   * Publish create mutation
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async publishCreate(result, next, options, _, args, ctx) {
+    hm('publishCreate %o', result);
+
+    let mutation = 'create';
+
+    // Fetch full item
+    // TODO: use cache
+    // TODO: fetch additional data if needed for complex ACL check
+    let fullItem = await this.model.findById(
+      new mongoose.Types.ObjectId(result.result.id)
+    );
+
+    // Workaround for mongodb. As we publish messages as plain objects.
+    fullItem = fullItem.toObject();
+    fullItem.id = fullItem._id;
+
+    await this.publishData({
+      node: fullItem,
+      mutation: mutation
+    }, fullItem, mutation);
+
+    next();
+  }
+
+  /**
+   * Publish data
+   *
+   * @param data
+   * @param item
+   * @param mutation
+   * @returns {Promise.<void>}
+   */
+  async publishData(data, item, mutation) {
+    console.log('publish data>', data, item, mutation);
+    //let item = data.node;
+
+    let topics = await this.getTopics(item);
+    console.log('topics', topics);
     for (let topic of topics) {
       // Publish
       hm('Publish to', topic);
@@ -1381,22 +1434,16 @@ export default class MongoDBModel extends Model {
       let subscription = 'subscribeTo' + capitalize(this.getName());
       hm('publish for subscription %s', subscription);
 
-      let mutation = 'update';
-
       // spikenail — namespace,
       // this.getName() is - workaround for redis pubsub. Allowing to subscribe only to board items like *.board.*.board
       // avoiding subscription to nested items: board.123.list.567.list
       // board.123.list.*.list - all lists of board 123
       await Spikenail.pubsub.publish(['spikenail', mutation, ...topic, this.getName()], {
-        [subscription]: {
-          mutation: mutation,
-          node: fullItem
-        }
+        [subscription]: data
       });
     }
-
-    next();
   }
+
 
   /**
    * Subscribe

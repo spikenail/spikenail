@@ -145,7 +145,9 @@ export default class Model {
   /**
    * After create
    */
-  async afterCreate() {}
+  async afterCreate(result, next, opts, input, ctx) {
+    next();
+  }
 
   /**
    * Process create
@@ -205,7 +207,9 @@ export default class Model {
   /**
    * After remove
    */
-  afterRemove() {}
+  afterRemove() {
+    next();
+  }
 
   /**
    * Process remove
@@ -765,13 +769,19 @@ export default class Model {
    * @returns {*[]}
    */
   getCreateChain() {
-    return [
+    let middlewares = [
       this.handleCreateACL,
       this.validate,
       this.beforeCreate,
       this.processCreate,
       this.afterCreate
-    ]
+    ];
+
+    if (Spikenail.pubsub) {
+      middlewares.push(this.publishCreate)
+    }
+
+    return middlewares;
   }
 
   /**
@@ -780,14 +790,20 @@ export default class Model {
    * @returns {*[]}
    */
   getUpdateChain() {
-    return [
+
+    let middlewares = [
       this.handleUpdateACL,
       this.validate,
       this.beforeUpdate,
       this.processUpdate,
-      this.afterUpdate,
-      this.publishUpdate
-    ]
+      this.afterUpdate
+    ];
+
+    if (Spikenail.pubsub) {
+      middlewares.push(this.publishUpdate)
+    }
+
+    return middlewares;
   }
 
   /**
