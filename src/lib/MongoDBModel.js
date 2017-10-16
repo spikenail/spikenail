@@ -236,11 +236,15 @@ export default class MongoDBModel extends Model {
 
     let removeResult = await this.model.findOneAndRemove({ _id: id });
 
-    debug('removeResult', removeResult);
+    hm('removeResult', removeResult);
 
     // Return original id
-    // FIXME: do not return id if nothing were removed
-    result.result = { id: input.id };
+    // FIXME: handle case where nothing have been removed. Don't publish data?
+    let response = removeResult.toObject();
+    response.id = id;
+    result.result = response;
+
+    next();
   }
 
   /**
@@ -1409,6 +1413,30 @@ export default class MongoDBModel extends Model {
       node: fullItem,
       mutation: mutation
     }, fullItem, mutation);
+
+    next();
+  }
+
+  /**
+   * Publish remove mutation
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async publishRemove(result, next, options, _, args, ctx) {
+    hm('publishRemove %o', result);
+
+    let mutation = 'remove';
+
+    await this.publishData({
+      node: result.result,
+      mutation: mutation
+    }, result.result, mutation);
 
     next();
   }

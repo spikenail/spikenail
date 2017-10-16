@@ -207,7 +207,7 @@ export default class Model {
   /**
    * After remove
    */
-  afterRemove() {
+  afterRemove(result, next, opts, input, ctx) {
     next();
   }
 
@@ -812,14 +812,19 @@ export default class Model {
    * @returns {*[]}
    */
   getRemoveChain() {
-    return [
+    let middlewares = [
       this.handleRemoveACL,
       //this.validate, TODO: not needed?
       this.beforeRemove,
       this.processRemove,
-      this.afterRemove,
-      //this.publishRemove
-    ]
+      this.afterRemove
+    ];
+
+    if (Spikenail.pubsub) {
+      middlewares.push(this.publishRemove)
+    }
+
+    return middlewares;
   }
 
   /**
@@ -1204,6 +1209,36 @@ export default class Model {
   }
 
   /**
+   * Publish create middleware
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async publishCreate(result, next, options, _, args, ctx) {
+    next();
+  }
+
+  /**
+   * Publish create middleware
+   *
+   * @param result
+   * @param next
+   * @param options
+   * @param _
+   * @param args
+   * @param ctx
+   * @returns {Promise.<void>}
+   */
+  async publishRemove(result, next, options, _, args, ctx) {
+    next();
+  }
+
+  /**
    * Subscribe
    *
    * @param _
@@ -1257,7 +1292,7 @@ export default class Model {
      *
      * @param model
      * @param item
-     * @param fetch if need to fetch item using item.id
+     * @param fetch if need to fetch item using item._id
      * @param parentName
      * @returns {Promise.<{}>}
      */
@@ -1265,7 +1300,7 @@ export default class Model {
       hm('recursive start');
 
       let tree = {};
-      tree.name = [model.getName(), item.id]; // card, 123
+      tree.name = [model.getName(), item._id]; // card, 123
       tree.topic = tree.name;
 
       // Concat topic
@@ -1302,10 +1337,10 @@ export default class Model {
         // Fetch item if needed. Only id of item could be provided
         hm('fetch', fetch, relItemId);
         if (fetch) {
-          hm('need to fetch full item first', item.id);
+          hm('need to fetch full item first', item._id);
           // Fetch full item
           let fullItem = await model.model.findById(
-            new mongoose.Types.ObjectId(item.id)
+            new mongoose.Types.ObjectId(item._id)
           );
 
           hm('fullItem', fullItem);
@@ -1316,7 +1351,7 @@ export default class Model {
 
         // If no foreign key specified
         if (!relItemId) {
-          hm('no ID found using FK, go to next rel', item.id);
+          hm('no ID found using FK, go to next rel', item._id);
           continue;
         }
 
@@ -1337,7 +1372,7 @@ export default class Model {
 
     // TODO: for some reason we don't have full item at the beginning
     // TODD: we need to actively use cache in order to avoid fetching same items twice
-    let tree = await recursive(this, result, true);
+    let tree = await recursive(this, result, false);
 
     hm('final topics tree %o', tree);
 

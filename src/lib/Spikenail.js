@@ -539,7 +539,8 @@ class Spikenail extends EventEmitter {
       config.outputFields.removedId = {
         type: GraphQLString,
         resolve: ({ result }) => {
-          return result ? result.id : null
+          // TODO: looks like workaround
+          return result ? toGlobalId(model.getName(), result.id) : null
         }
       };
 
