@@ -120,31 +120,34 @@ class Spikenail extends EventEmitter {
       this.server = await this.app.listen(5000);
       console.log('Server is listening on port 5000');
 
-      // Start the websocket server
-      // Create WebSocket listener server
-      const websocketServer = createServer((request, response) => {
-        response.writeHead(404);
-        response.end();
-      });
+      if (this.pubsub) {
+        // Start the websocket server
+        // Create WebSocket listener server
+        const websocketServer = createServer((request, response) => {
+          response.writeHead(404);
+          response.end();
+        });
 
-      // Bind it to port and start listening
-      websocketServer.listen(8000, () => console.log(
-        `Websocket Server is now running on http://localhost:8000`
-      ));
+        // Bind it to port and start listening
+        websocketServer.listen(8000, () => console.log(
+          `Websocket Server is now running on http://localhost:8000`
+        ));
 
-      const subscriptionServer = SubscriptionServer.create(
-        {
-          schema: this.graphqlSchema,
-          execute,
-          subscribe,
-        },
-        {
-          server: websocketServer,
-          path: '/graphql',
-        },
-      );
 
-      this.subscriptionServer = subscriptionServer;
+        const subscriptionServer = SubscriptionServer.create(
+          {
+            schema: this.graphqlSchema,
+            execute,
+            subscribe,
+          },
+          {
+            server: websocketServer,
+            path: '/graphql',
+          },
+        );
+
+        this.subscriptionServer = subscriptionServer;
+      }
 
     } catch (err) {
       console.error(err);
