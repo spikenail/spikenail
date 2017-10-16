@@ -1283,7 +1283,9 @@ export default class Model {
 
     let topics = [];
 
-    let maxTopicDepth = this.schema.maxTopicDepth;
+    // Currently we can't support subscriptions like where item.parent.condition = 123.
+    // So maxTopicDepth more that 2 make no sense
+    let maxTopicDepth = this.schema.maxTopicDepth || 2;
 
     let depth = 1;
 
