@@ -36,6 +36,8 @@ Full support of ES7 features
 
 Native GraphQL support
 
+Real-Time: GraphQL Subscriptions
+
 Relay compatible API
 
 Easy to define access control of any complexity:
@@ -395,12 +397,6 @@ mutation {
 }
 ```
 
-#### Subscriptions
-
-##### subscribeToX
-
-
-
 ##### removeX
 
 ```js
@@ -416,6 +412,101 @@ mutation {
     errors {
       code
       message
+    }
+  }
+}
+```
+
+#### Subscriptions
+
+First of all, you need to install a needed PubSub adapter:
+
+```
+mpm install --save spikenail-pubsub-redis
+```
+
+Then, create a `config/pubsub.js` file to enable subscriptions:
+
+```js
+export default {
+  pubsub: {
+    adapter: 'redis'
+  }
+}
+```
+
+When the server is started, you can go to the `http://localhost:5000/graphiql`
+to open in-browser IDE which supports GraphQL subscriptions.
+
+##### subscribeToX
+
+Examples:
+
+Subscribe to all Items:
+
+```
+subscription {
+  subscribeToItem {
+    mutation
+    node {
+      id
+      name
+      user {
+        id
+        name
+      }
+      nesteditems {
+        edges {
+          node {
+            id
+            name
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Subscribe to only particular item changes:
+
+```
+subscription {
+  subscribeToItem(filter: { where: { id: "Ym9hcmQ6NTkyYmZjOTA2ZjM5Zjc5MGNmNGI5Yjg4" } }) {
+    mutation
+    node {
+      id
+      name
+      user {
+        id
+        name
+      }
+      nesteditems {
+        edges {
+          node {
+            id
+            name
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Subscribe to all Books in specified Category:
+
+```
+subscription {
+  subscribeToBook(filter: { where: { categoryId: "Ym9hcmQ6NTkyYmZjOTA2ZjM5Zjc5MGNmNGI5Yjg4" } }) {
+    mutation
+    node {
+      id
+      title
+      author {
+        id
+        name
+      }
     }
   }
 }
@@ -765,7 +856,7 @@ validations: [{
 
 ## Future plans
 
-GraphQL subscriptions
+SQL databases support
 
 Simple endpoint (non-relay)
 
