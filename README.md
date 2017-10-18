@@ -422,7 +422,7 @@ mutation {
 First of all, you need to install a needed PubSub adapter:
 
 ```
-mpm install --save spikenail-pubsub-redis
+npm install --save spikenail-pubsub-redis
 ```
 
 Then, create a `config/pubsub.js` file to enable subscriptions:
