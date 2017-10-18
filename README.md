@@ -435,8 +435,15 @@ export default {
 }
 ```
 
-When the server is started, you can go to the `http://localhost:5000/graphiql`
+When the server is started, you can go to the http://localhost:5000/graphiql
 to open in-browser IDE which supports GraphQL subscriptions.
+
+Default WebSocket endpoint is ws://localhost:8000/graphql
+
+##### WebSockets authentication
+
+It’s not possible to provide custom headers when creating WebSocket connection in browser.
+You to pass `auth_token` as query parameter, e.g. ws://localhost:8000/graphql?auth_token=igor-secret-token
 
 ##### subscribeToX
 
@@ -444,7 +451,7 @@ Examples:
 
 Subscribe to all Items:
 
-```
+```js
 subscription {
   subscribeToItem {
     mutation
@@ -470,7 +477,7 @@ subscription {
 
 Subscribe to only particular item changes:
 
-```
+```js
 subscription {
   subscribeToItem(filter: { where: { id: "Ym9hcmQ6NTkyYmZjOTA2ZjM5Zjc5MGNmNGI5Yjg4" } }) {
     mutation
@@ -496,7 +503,7 @@ subscription {
 
 Subscribe to all Books in specified Category:
 
-```
+```js
 subscription {
   subscribeToBook(filter: { where: { categoryId: "Ym9hcmQ6NTkyYmZjOTA2ZjM5Zjc5MGNmNGI5Yjg4" } }) {
     mutation

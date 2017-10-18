@@ -1482,7 +1482,7 @@ export default class MongoDBModel extends Model {
    * @param info
    */
   subscribe(_, args, context, info) {
-    hm('subscribe', _, args, context);
+    hm('subscribe context', context);
 
     // Always starts from * for handling cases like we want to subscribe on cards: user/123/board/123/lists/123/card
     // TODO: could be optimized for known single level items
@@ -1535,6 +1535,7 @@ export default class MongoDBModel extends Model {
     try {
       hm('messagesFilter', payload, args);
 
+      hm ('ctx', ctx);
       if (!payload) {
         hm('No payload');
         // looks like it is invoked with empty payload when we open graphiql

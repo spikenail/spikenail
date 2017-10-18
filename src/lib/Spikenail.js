@@ -28,6 +28,10 @@ import { createServer } from 'http';
 import { SubscriptionServer } from 'subscriptions-transport-ws';
 import { execute, subscribe } from 'graphql';
 
+const url = require('url');
+
+import AuthService from './services/AuthService';
+
 
 import {
   GraphQLObjectType,
@@ -97,10 +101,13 @@ class Spikenail extends EventEmitter {
           })(context, next),
         );
 
-        router.get('/graphiql', graphiqlKoa({
-          endpointURL: '/graphql',
-          subscriptionsEndpoint: `ws://localhost:8000/graphql`
-        }));
+        router.get('/graphiql', (context, next) => {
+          return graphiqlKoa({
+            endpointURL: '/graphql',
+            subscriptionsEndpoint: `ws://localhost:8000/graphql?auth_token=` + context.request.query.auth_token
+          })(context, next)
+        }
+        );
 
       } else {
         debug('No models loaded');
@@ -139,6 +146,22 @@ class Spikenail extends EventEmitter {
             schema: this.graphqlSchema,
             execute,
             subscribe,
+            onConnect: async function(payload, socket) {
+              let location = url.parse(socket.upgradeReq.url, true);
+              let authToken = location.query.auth_token;
+
+              if (!authToken) {
+                return {};
+              }
+
+              let currentUser = await AuthService.authenticate(authToken);
+
+              if (currentUser) {
+                return {
+                  currentUser: currentUser
+                }
+              }
+            }
           },
           {
             server: websocketServer,

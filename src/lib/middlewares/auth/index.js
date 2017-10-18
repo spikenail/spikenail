@@ -1,4 +1,4 @@
-import Spikenail from '../../Spikenail';
+import AuthService from '../../services/AuthService';
 
 export default function(options) {
   return async function(ctx, next) {
@@ -24,10 +24,10 @@ export default function(options) {
 
     ctx.token = token;
 
-    // request current user by token
-    // TODO: user model is hardcoded as user, probably, make it configurable
-    if (Spikenail.models.user) {
-      ctx.currentUser = await Spikenail.models.user.model.findOne({"tokens.token": ctx.token});
+    let currentUser = await AuthService.authenticate(token);
+
+    if (currentUser) {
+      ctx.currentUser = currentUser;
     }
 
     await next();
