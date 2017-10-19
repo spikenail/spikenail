@@ -1496,8 +1496,19 @@ export default class MongoDBModel extends Model {
       if (where.id) {
         id = fromGlobalId(where.id).id;
       }
-      // Check relations and optimize
-      // TODO
+
+      // Optimization for querying items using belongsTo relation
+      // let's find foreignKeys of belongsTo relations
+      let rels = this.getBelongsToRelations();
+      let foreignKeys = rels.map(r => r.foreignKey);
+      hm('foreignKeys', foreignKeys);
+      let relationKeys = Object.keys(where).filter(field => ~foreignKeys.indexOf(field));
+
+      if (relationKeys.length) {
+        // Pick the first relation anyway
+        path.push(rels[0].ref);
+        path.push(fromGlobalId(where[relationKeys[0]]).id);
+      }
     }
 
     path.push(this.getName());
