@@ -1450,11 +1450,7 @@ export default class MongoDBModel extends Model {
    * @returns {Promise.<void>}
    */
   async publishData(data, item, mutation) {
-    console.log('publish data>', data, item, mutation);
-    //let item = data.node;
-
     let topics = await this.getTopics(item);
-    console.log('topics', topics);
     for (let topic of topics) {
       // Publish
       hm('Publish to', topic);
