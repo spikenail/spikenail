@@ -1661,10 +1661,10 @@ export default class MongoDBModel extends Model {
         return ctx.dataLoaders[dataLoaderName];
       }
 
-      ctx.dataLoaders[dataLoaderName] = new DataLoader(async function(ids) {
-        let result = await this.query({ query: {_id: { '$in': ids }} });
-        return result.length ? result : [null];
-      });
+      ctx.dataLoaders[dataLoaderName] = new DataLoader((async function(ids) {
+        let result = await this.model.find({ _id: { '$in': ids }} );
+        return result;
+      }).bind(this));
     }
 
     // Has many

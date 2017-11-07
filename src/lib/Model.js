@@ -169,14 +169,14 @@ export default class Model {
    * @param result
    * @param next
    */
-  beforeUpdate(result, next) {
+  beforeUpdate(result, next, opts, input, ctx) {
     next();
   }
 
   /**
    * After update
    */
-  afterUpdate(result, next) {
+  afterUpdate(result, next, opts, input, ctx) {
     next();
   }
 
@@ -200,7 +200,7 @@ export default class Model {
    * @param result
    * @param next
    */
-  beforeRemove(result, next) {
+  beforeRemove(result, next, opts, input, ctx) {
     next();
   }
 
