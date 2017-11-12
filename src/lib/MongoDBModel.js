@@ -205,6 +205,10 @@ export default class MongoDBModel extends Model {
     debug('data', data);
     debug('id', id);
 
+    // Save previous values before update
+    ctx.previousValues = await this.getDataLoaderFromContext(ctx).load(id);
+    hm('previousValues %o', ctx.previousValues);
+
     // Update with no document returned. As we probably will request it later
     await this.model.findByIdAndUpdate(id, { $set: data }, { new: true });
 
@@ -1376,7 +1380,8 @@ export default class MongoDBModel extends Model {
 
     await this.publishData({
       node: fullItem,
-      mutation: mutation
+      mutation: mutation,
+      previousValues: ctx.previousValues
     }, fullItem, mutation);
 
     next();
@@ -1411,7 +1416,8 @@ export default class MongoDBModel extends Model {
 
     await this.publishData({
       node: fullItem,
-      mutation: mutation
+      mutation: mutation,
+      previousValues: null
     }, fullItem, mutation);
 
     next();
@@ -1435,6 +1441,7 @@ export default class MongoDBModel extends Model {
 
     await this.publishData({
       node: result.result,
+      previousValues: result.result,
       mutation: mutation
     }, result.result, mutation);
 
@@ -1478,7 +1485,7 @@ export default class MongoDBModel extends Model {
    * @param info
    */
   subscribe(_, args, context, info) {
-    hm('subscribe context', context);
+    hm('subscribe context', context, args);
 
     // Always starts from * for handling cases like we want to subscribe on cards: user/123/board/123/lists/123/card
     // TODO: could be optimized for known single level items

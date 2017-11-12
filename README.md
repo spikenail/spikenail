@@ -471,6 +471,9 @@ subscription {
         }
       }
     }
+    previousValues {
+      id
+    }
   }
 }
 ```
@@ -518,6 +521,8 @@ subscription {
   }
 }
 ```
+
+
 
 ## Defining a Model
 

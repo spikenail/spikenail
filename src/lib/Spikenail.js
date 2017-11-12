@@ -474,6 +474,9 @@ class Spikenail extends EventEmitter {
           mutation: { type: GraphQLString },
           node: {
             type: modelTypes[model.getName()]
+          },
+          previousValues: {
+            type: modelTypes[model.getName()]
           }
         })
       }),
