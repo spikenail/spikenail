@@ -1282,11 +1282,17 @@ export default class MongoDBModel extends Model {
       [options.property.foreignKey]: { '$in': ids }
     };
 
+    // Check if custom condition specified
+    if (options.property.getCondition) {
+      options.query = options.property.getCondition(_);
+    }
+
     options.actionType = 'hasMany';
 
     debug(this.getName(), 'resolveHasMany options', options);
 
-    return (await this.processChain(this.getReadChain(), ...arguments)).result;
+    let res = (await this.processChain(this.getReadChain(), ...arguments)).result;
+    return res;
   }
 
   /**

@@ -1088,18 +1088,31 @@ export default class Model {
     let edges = result.edges || [];
 
     debug(this.getName(), 'hasManyResolve result %j', result);
+    let customHasManyQueryFn = options.property.getCondition;
 
     // dataloader requires result to be returned strictly according to passed paramsCollection
-    return paramsCollection.map((params) => {
+    return paramsCollection.map(params => {
 
       let id = params.arguments[0].id;
       // https://facebook.github.io/relay/graphql/connections.htm
 
-      let result = edges.filter(e => {
+      let filterFn = (e) => {
         // TODO: we need to recalculate edge cursor as it's value make no sense in current case
         // TODO: but first - we need to refactor current pagination approach - not sure what cursors should be in hasMany case
-        return e.node[fk].toString() === id.toString()
-      });
+        return e.node[fk].toString() === id.toString();
+      };
+
+      // For custom hasMany condition we have custom logic
+      if (customHasManyQueryFn) {
+        // apply sift
+        filterFn = (e) => {
+          let siftRes = sift(customHasManyQueryFn([params.arguments[0]]), [e.node]);
+          return !!siftRes.length;
+        }
+      }
+
+
+      let result = edges.filter(filterFn);
 
       return {
         edges: result,
