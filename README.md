@@ -581,8 +581,9 @@ In this case framework will try to guess other parameters.
 ##### Custom hasMany condition
 
 ```js
- getConditions: function(_) {
-    return { otherModelField: _.name }
+ getCondition: function(_) {
+    let names = _.map(i => i.name);
+    return { otherModelField: { '$in': names } }
  }
 ```
 
