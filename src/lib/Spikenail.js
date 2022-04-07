@@ -26,7 +26,6 @@ import { withFilter } from 'graphql-subscriptions';
 
 import { createServer } from 'http';
 import { SubscriptionServer } from 'subscriptions-transport-ws';
-import { execute, subscribe } from 'graphql';
 
 const url = require('url');
 
@@ -34,6 +33,8 @@ import AuthService from './services/AuthService';
 
 
 import {
+  execute,
+  subscribe,
   GraphQLObjectType,
   GraphQLList,
   GraphQLString,
@@ -43,7 +44,7 @@ import {
   GraphQLID,
   GraphQLSchema,
   GraphQLNonNull,
-  getNullableType
+  getNullableType,
 } from 'graphql';
 
 import GraphQLJSON from 'graphql-type-json';
@@ -253,7 +254,15 @@ class Spikenail extends EventEmitter {
   bootDataSources(sources) {
     // TODO remove double default
     // TODO: only one data source is currently supported
-    return mongoose.connect(sources.default.default.connectionString, { server: { socketOptions: { keepAlive: 1 } } });
+    return (
+      /* TODO: JSFIX could not patch the breaking change:
+      BREAKING CHANGE: mongoose.connect() returns a promise, removed MongooseThenable #5796 
+      Suggested fix: Only relevant if you depend on the return value being a reference to the mongoose object. In that case, you need to modify the usages of the return value to get the mongoose object from somewhere else. */
+      mongoose.connect(
+        sources.default.default.connectionString,
+        { server: { socketOptions: { keepAlive: 1 } } }
+      )
+    )
   }
 
   /**
